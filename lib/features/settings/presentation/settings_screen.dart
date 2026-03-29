@@ -94,8 +94,8 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
             value: settings.smartCategorization,
-            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
-            activeThumbColor: const Color(0xFF2AABEE),
+            // ignore: deprecated_member_use
+            activeColor: const Color(0xFF2AABEE),
             onChanged: controller.setSmartCategorization,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -123,8 +123,8 @@ class SettingsScreen extends ConsumerWidget {
                   : const Color(0xFF78909C),
             ),
             value: settings.wifiOnly,
-            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
-            activeThumbColor: const Color(0xFF2AABEE),
+            // ignore: deprecated_member_use
+            activeColor: const Color(0xFF2AABEE),
             onChanged: controller.setWifiOnly,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -149,8 +149,8 @@ class SettingsScreen extends ConsumerWidget {
                   : const Color(0xFF78909C),
             ),
             value: settings.pauseOnLowBattery,
-            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
-            activeThumbColor: const Color(0xFF2AABEE),
+            // ignore: deprecated_member_use
+            activeColor: const Color(0xFF2AABEE),
             onChanged: controller.setPauseOnLowBattery,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -173,8 +173,8 @@ class SettingsScreen extends ConsumerWidget {
                   : const Color(0xFF78909C),
             ),
             value: settings.autoExtractArchives,
-            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
-            activeThumbColor: const Color(0xFF2AABEE),
+            // ignore: deprecated_member_use
+            activeColor: const Color(0xFF2AABEE),
             onChanged: controller.setAutoExtractArchives,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -239,8 +239,8 @@ class SettingsScreen extends ConsumerWidget {
                   : const Color(0xFFFF6D00),
             ),
             value: settings.isDarkMode,
-            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
-            activeThumbColor: const Color(0xFF2AABEE),
+            // ignore: deprecated_member_use
+            activeColor: const Color(0xFF2AABEE),
             onChanged: controller.setDarkMode,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
