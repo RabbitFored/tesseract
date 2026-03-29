@@ -162,6 +162,9 @@ class DownloadStats {
           paused++;
         case DownloadStatus.completed:
           completed++;
+        case DownloadStatus.extracting:
+          // Count extracting files as active — they are still "in progress".
+          active++;
         case DownloadStatus.error:
           errors++;
       }

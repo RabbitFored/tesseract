@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:archive/archive.dart';
+import 'package:archive/archive_io.dart';
 
 import '../../../core/utils/logger.dart';
 
@@ -169,13 +170,13 @@ class ExtractionService {
 
       if (ext == 'zip') {
         inputStream = InputFileStream(params.sourcePath);
-        final archive = ZipDecoder().decodeStream(inputStream);
+        final archive = ZipDecoder().decodeBuffer(inputStream);
         _extractEntries(archive, params.targetDir, extractedPaths);
         inputStream.close();
         inputStream = null;
       } else if (ext == 'tar') {
         inputStream = InputFileStream(params.sourcePath);
-        final archive = TarDecoder().decodeStream(inputStream);
+        final archive = TarDecoder().decodeBuffer(inputStream);
         _extractEntries(archive, params.targetDir, extractedPaths);
         inputStream.close();
         inputStream = null;

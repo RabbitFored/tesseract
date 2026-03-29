@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../downloader/domain/download_item.dart';
-import '../../downloader/domain/download_status.dart';
+import '../../../downloader/domain/download_item.dart';
+import '../../../downloader/domain/download_status.dart';
 
 /// Maps file extensions to Material icons and accent colors.
 class FileTypeIcon {

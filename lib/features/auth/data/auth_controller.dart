@@ -1,7 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tdlib/tdlib.dart';
+import 'package:flutter_riverpod/legacy.dart';
+import 'package:tdlib/td_api.dart';
 
 import '../../../core/tdlib/tdlib_client.dart';
 import '../../../core/tdlib/tdlib_provider.dart';
@@ -58,7 +59,7 @@ class AuthController extends StateNotifier<AuthFlowState> {
       case AuthorizationStateWaitCode(codeInfo: final info):
         _setState(AuthWaitCode(
           phoneNumber: info.phoneNumber,
-          codeLength: info.type.length ?? 5,
+          codeLength: _codeLength(info.type),
           codeType: _describeCodeType(info.type),
         ));
 
@@ -130,5 +131,12 @@ class AuthController extends StateNotifier<AuthFlowState> {
       AuthenticationCodeTypeFlashCall() => 'Flash call',
       _ => 'Code',
     };
+  }
+  /// Safely extracts the digit count from the given code type.
+  /// Only Sms / TelegramMessage / Call subtypes carry a length.
+  static int _codeLength(AuthenticationCodeType type) {
+    if (type is AuthenticationCodeTypeSms) return type.length;
+    if (type is AuthenticationCodeTypeTelegramMessage) return type.length;
+    return 5; // safe default for call / flash-call / etc.
   }
 }

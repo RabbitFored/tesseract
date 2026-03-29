@@ -87,14 +87,10 @@ class SpeedTracker {
   void _tick() {
     int totalSpeed = 0;
 
+    // Per-file speeds are computed by computeSpeed() on each TDLib UpdateFile
+    // event. Here we just re-sum them to update the global speed and history.
     for (final fileId in _snapshots.keys.toList()) {
-      final prevSize = _snapshots[fileId] ?? 0;
-      // The current size will be updated by the next reportProgress call.
-      // For now, compute delta from what we last stored.
-      final currentSpeed = _speeds[fileId] ?? 0;
-      totalSpeed += currentSpeed;
-      // Snapshot is already current — speed will be calculated in
-      // _computeSpeed called externally.
+      totalSpeed += _speeds[fileId] ?? 0;
     }
 
     _globalSpeed = totalSpeed;

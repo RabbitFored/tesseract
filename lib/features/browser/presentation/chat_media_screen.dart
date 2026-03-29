@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../../../dashboard/presentation/utils/display_helpers.dart';
-import '../../../downloader/data/download_manager.dart';
-import '../../../downloader/domain/download_item.dart';
+import '../../dashboard/presentation/utils/display_helpers.dart';
+import '../../downloader/data/download_manager.dart';
+import '../../downloader/domain/download_item.dart';
 import '../data/chat_media_controller.dart';
 import '../domain/media_message.dart';
 import 'widgets/media_file_tile.dart';

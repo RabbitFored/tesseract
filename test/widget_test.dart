@@ -1,30 +1,40 @@
-// This is a basic Flutter widget test.
+// Minimal smoke test for TESSERACT.
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// The original boilerplate referenced `MyApp()` which does not exist in this
+// project, causing `flutter test` to fail at compile time. This test wires up
+// the actual app widget with a fake TdLibClient so it can render without a
+// real TDLib native library present in the test environment.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:telegram_downloader/main.dart';
+import 'package:telegram_downloader/app.dart';
+import 'package:telegram_downloader/core/tdlib/tdlib_client.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('App renders without crashing', (WidgetTester tester) async {
+    // Build the app with a fake TdLibClient injected so no native library
+    // is required during tests.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          tdlibClientProvider.overrideWithValue(_FakeTdLibClient()),
+        ],
+        child: const TelegramDownloaderApp(),
+      ),
+    );
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
-
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // The app should render at least one widget without throwing.
+    expect(find.byType(MaterialApp), findsOneWidget);
   });
 }
+
+/// A no-op TdLibClient used in tests to avoid initializing the native TDLib.
+class _FakeTdLibClient extends TdLibClient {
+  @override
+  Future<void> initialize() async {
+    // No-op: skip native initialization in test environment.
+  }
+}
+

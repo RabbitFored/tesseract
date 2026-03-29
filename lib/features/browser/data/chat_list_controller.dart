@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tdlib/tdlib.dart';
+import 'package:flutter_riverpod/legacy.dart';
+import 'package:tdlib/td_api.dart';
 
 import '../../../core/tdlib/tdlib_provider.dart';
 import '../../../core/utils/logger.dart';

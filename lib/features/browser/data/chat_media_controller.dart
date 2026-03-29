@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tdlib/tdlib.dart';
+import 'package:flutter_riverpod/legacy.dart';
+import 'package:tdlib/td_api.dart';
 
 import '../../../core/tdlib/tdlib_provider.dart';
 import '../../../core/utils/logger.dart';
@@ -302,7 +303,6 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
         limit: _pageSize,
         filter: null, // No TDLib filter — we apply our own media filter.
         messageThreadId: 0,
-        savedMessagesTopicId: 0,
       ));
 
       if (result is! FoundChatMessages) break;
@@ -331,7 +331,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
     final content = msg.content;
 
     return switch (content) {
-      MessageDocument(document: final doc) => MediaMessage(
+      MessageDocument(document: final doc, caption: final cap) => MediaMessage(
           messageId: msg.id,
           chatId: _chatId,
           fileId: doc.document.id,
@@ -339,10 +339,10 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
           fileSize: doc.document.expectedSize,
           mediaType: MediaType.document,
           mimeType: doc.mimeType,
-          caption: doc.caption.text,
+          caption: cap.text,
           date: msg.date,
         ),
-      MessageVideo(video: final vid) => MediaMessage(
+      MessageVideo(video: final vid, caption: final cap) => MediaMessage(
           messageId: msg.id,
           chatId: _chatId,
           fileId: vid.video.id,
@@ -352,11 +352,11 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
           fileSize: vid.video.expectedSize,
           mediaType: MediaType.video,
           mimeType: vid.mimeType,
-          caption: vid.caption.text,
+          caption: cap.text,
           date: msg.date,
           thumbnailFileId: vid.thumbnail?.file.id,
         ),
-      MessageAudio(audio: final aud) => MediaMessage(
+      MessageAudio(audio: final aud, caption: final cap) => MediaMessage(
           messageId: msg.id,
           chatId: _chatId,
           fileId: aud.audio.id,
@@ -366,11 +366,11 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
           fileSize: aud.audio.expectedSize,
           mediaType: MediaType.audio,
           mimeType: aud.mimeType,
-          caption: aud.caption.text,
+          caption: cap.text,
           date: msg.date,
           thumbnailFileId: aud.albumCoverThumbnail?.file.id,
         ),
-      MessagePhoto(photo: final photo) => () {
+      MessagePhoto(photo: final photo, caption: final cap) => () {
           final sizes = photo.sizes;
           if (sizes.isEmpty) return null;
           final largest = sizes.last;
@@ -381,11 +381,11 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
             fileName: 'photo_${msg.id}.jpg',
             fileSize: largest.photo.expectedSize,
             mediaType: MediaType.photo,
-            caption: photo.caption.text,
+            caption: cap.text,
             date: msg.date,
           );
         }(),
-      MessageAnimation(animation: final anim) => MediaMessage(
+      MessageAnimation(animation: final anim, caption: final cap) => MediaMessage(
           messageId: msg.id,
           chatId: _chatId,
           fileId: anim.animation.id,
@@ -395,11 +395,11 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
           fileSize: anim.animation.expectedSize,
           mediaType: MediaType.animation,
           mimeType: anim.mimeType,
-          caption: anim.caption.text,
+          caption: cap.text,
           date: msg.date,
           thumbnailFileId: anim.thumbnail?.file.id,
         ),
-      MessageVoiceNote(voiceNote: final vn) => MediaMessage(
+      MessageVoiceNote(voiceNote: final vn, caption: final cap) => MediaMessage(
           messageId: msg.id,
           chatId: _chatId,
           fileId: vn.voice.id,
@@ -407,7 +407,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
           fileSize: vn.voice.expectedSize,
           mediaType: MediaType.voiceNote,
           mimeType: vn.mimeType,
-          caption: vn.caption.text,
+          caption: cap.text,
           date: msg.date,
         ),
       MessageVideoNote(videoNote: final vn) => MediaMessage(

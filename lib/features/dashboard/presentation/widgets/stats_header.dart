@@ -4,8 +4,8 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../downloader/domain/download_provider.dart';
-import 'utils/display_helpers.dart';
+import '../../../downloader/domain/download_provider.dart';
+import '../utils/display_helpers.dart';
 
 /// Compact stats header card showing active downloads, overall progress,
 /// global speed, and a sparkline chart of speed history.

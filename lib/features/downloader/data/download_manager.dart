@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' as io;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:tdlib/tdlib.dart';
+import 'package:tdlib/td_api.dart';
 
 import '../../../core/tdlib/tdlib_client.dart';
 import '../../../core/tdlib/tdlib_provider.dart';
@@ -351,7 +351,7 @@ class DownloadManager {
 
       final category = SettingsState.categoryForExtension(item.fileName);
       final targetDir =
-          Directory('${settings.downloadBasePath}/$category');
+          io.Directory('${settings.downloadBasePath}/$category');
 
       if (!await targetDir.exists()) {
         await targetDir.create(recursive: true);
@@ -468,4 +468,6 @@ class DownloadManager {
   }
 }
 
-typedef IOFile = File;
+// Alias for dart:io.File to avoid shadowing the TDLib File type.
+typedef IOFile = io.File;
+typedef IODirectory = io.Directory;

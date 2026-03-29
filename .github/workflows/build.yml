@@ -43,11 +43,13 @@ jobs:
         run: flutter pub get
 
       # ── Decode Keystore ───────────────────────────────────────
-      # Store the base64-encoded keystore as a GitHub secret:
-      #   KEYSTORE_BASE64  – base64 of your .jks file
+      # Required GitHub secrets:
+      #   KEYSTORE_BASE64   – base64 of your .jks keystore file
       #   KEYSTORE_PASSWORD – keystore password
-      #   KEY_ALIAS         – key alias name
+      #   KEY_ALIAS         – key alias
       #   KEY_PASSWORD      – key password
+      #   TELEGRAM_API_ID   – Telegram API ID (from my.telegram.org/apps)
+      #   TELEGRAM_API_HASH – Telegram API hash
       - name: Decode keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release-keystore.jks
@@ -58,16 +60,23 @@ jobs:
           storePassword=${{ secrets.KEYSTORE_PASSWORD }}
           keyPassword=${{ secrets.KEY_PASSWORD }}
           keyAlias=${{ secrets.KEY_ALIAS }}
-          storeFile=release-keystore.jks
+          storeFile=${{ github.workspace }}/android/app/release-keystore.jks
           EOF
 
       # ── Analyze ───────────────────────────────────────────────
       - name: Run static analysis
         run: flutter analyze --no-fatal-infos
 
+      # ── Tests ─────────────────────────────────────────────────
+      - name: Run unit & widget tests
+        run: flutter test
+
       # ── Build APK ─────────────────────────────────────────────
       - name: Build release APK
-        run: flutter build apk --release --no-tree-shake-icons
+        run: >
+          flutter build apk --release --no-tree-shake-icons
+          --dart-define=TELEGRAM_API_ID=${{ secrets.TELEGRAM_API_ID }}
+          --dart-define=TELEGRAM_API_HASH=${{ secrets.TELEGRAM_API_HASH }}
 
       # ── Upload Artifact ───────────────────────────────────────
       - name: Upload release APK

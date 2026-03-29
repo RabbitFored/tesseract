@@ -1,5 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:tdlib/tdlib.dart';
+import 'package:tdlib/td_api.dart';
 
 import 'tdlib_client.dart';
 

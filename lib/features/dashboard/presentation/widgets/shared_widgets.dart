@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../downloader/domain/download_item.dart';
-import '../../downloader/domain/download_status.dart';
+import '../../../downloader/domain/download_item.dart';
+import '../../../downloader/domain/download_status.dart';
 
 /// Empty state widget for download list tabs.
 class EmptyDownloadState extends StatelessWidget {

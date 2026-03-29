@@ -1,13 +1,18 @@
 /// Application-wide constants.
 ///
-/// Replace [telegramApiId] and [telegramApiHash] with your own values
-/// obtained from https://my.telegram.org/apps before running the app.
+/// Telegram API credentials are injected at build time via `--dart-define`:
+///   flutter build apk \
+///     --dart-define=TELEGRAM_API_ID=<your_id> \
+///     --dart-define=TELEGRAM_API_HASH=<your_hash>
+///
+/// Register at https://my.telegram.org/apps to obtain your credentials.
+/// In CI, these are supplied from GitHub secrets (see .github/workflows/build.yml).
 abstract final class AppConstants {
   static const String appVersion = '1.0.0';
 
-  // ── Telegram API credentials ─────────────────────────────────
-  // IMPORTANT: Register at https://my.telegram.org/apps to obtain these.
-  // For production, consider loading from --dart-define or a .env file.
-  static const int telegramApiId = 38688572; // TODO: replace with your api_id
-  static const String telegramApiHash = '05990baa445d31c8bc8b9538e2eabfa3'; // TODO: replace with your api_hash
+  // ── Telegram API credentials (injected via --dart-define) ────
+  static const int telegramApiId =
+      int.fromEnvironment('TELEGRAM_API_ID', defaultValue: 0);
+  static const String telegramApiHash =
+      String.fromEnvironment('TELEGRAM_API_HASH', defaultValue: '');
 }
