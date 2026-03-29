@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/download_db.dart';
 import '../data/download_manager.dart';
-import '../data/speed_tracker.dart';
 import '../domain/download_item.dart';
 import '../domain/download_status.dart';
 

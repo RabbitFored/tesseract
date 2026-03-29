@@ -143,5 +143,5 @@ class DownloadItem {
   @override
   String toString() =>
       'DownloadItem(fileId: $fileId, status: ${status.name}, '
-      '${downloadedSize}/${totalSize} bytes, speed: ${currentSpeed}B/s)';
+      '$downloadedSize/$totalSize bytes, speed: ${currentSpeed}B/s)';
 }

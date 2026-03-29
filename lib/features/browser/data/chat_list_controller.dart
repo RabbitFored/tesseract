@@ -55,6 +55,7 @@ class ChatListController extends StateNotifier<ChatListState> {
       final send = _ref.read(tdlibSendProvider);
 
       // TDLib getChats returns a list of chat IDs ordered by last message.
+      // ignore: prefer_const_constructors
       final result = await send(GetChats(
         chatList: null, // main chat list
         limit: _pageSize,
@@ -93,6 +94,7 @@ class ChatListController extends StateNotifier<ChatListState> {
       final send = _ref.read(tdlibSendProvider);
 
       // Use the last chat's order as offset for pagination.
+      // ignore: prefer_const_constructors
       final result = await send(GetChats(
         chatList: null,
         limit: _pageSize,

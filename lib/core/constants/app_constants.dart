@@ -2,8 +2,8 @@
 ///
 /// Telegram API credentials are injected at build time via `--dart-define`:
 ///   flutter build apk \
-///     --dart-define=TELEGRAM_API_ID=<your_id> \
-///     --dart-define=TELEGRAM_API_HASH=<your_hash>
+///     --dart-define=TELEGRAM_API_ID=YOUR_ID \
+///     --dart-define=TELEGRAM_API_HASH=YOUR_HASH
 ///
 /// Register at https://my.telegram.org/apps to obtain your credentials.
 /// In CI, these are supplied from GitHub secrets (see .github/workflows/build.yml).

@@ -262,9 +262,9 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
         onlyLocal: false,
       ));
 
-      if (result is! Messages || result.messages == null) break;
+      if (result is! Messages) break;
 
-      final msgs = result.messages!;
+      final msgs = result.messages;
       if (msgs.isEmpty) break;
 
       for (final msg in msgs) {
@@ -362,7 +362,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
           fileId: aud.audio.id,
           fileName: aud.fileName.isNotEmpty
               ? aud.fileName
-              : '${aud.title ?? 'audio_${msg.id}'}.mp3',
+              : '${aud.title.isNotEmpty ? aud.title : 'audio_${msg.id}'}.mp3',
           fileSize: aud.audio.expectedSize,
           mediaType: MediaType.audio,
           mimeType: aud.mimeType,

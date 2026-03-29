@@ -68,8 +68,6 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     // Deterministic color from chat ID.
     final colors = [
       const Color(0xFFE040FB),
