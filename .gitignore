@@ -1,0 +1,25 @@
+# Telegram Downloader – .gitignore
+
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Android
+android/.gradle/
+android/app/release-keystore.jks
+android/key.properties
+android/local.properties
+
+# iOS (not used yet, but just in case)
+ios/Pods/
+ios/.symlinks/
+
+# Misc
+*.log
+.DS_Store
+.env

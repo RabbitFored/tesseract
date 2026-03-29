@@ -1,0 +1,471 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:tdlib/tdlib.dart';
+
+import '../../../core/tdlib/tdlib_client.dart';
+import '../../../core/tdlib/tdlib_provider.dart';
+import '../../../core/utils/logger.dart';
+import '../../settings/data/settings_controller.dart';
+import '../../settings/domain/settings_state.dart';
+import '../domain/download_item.dart';
+import '../domain/download_status.dart';
+import 'background_service.dart';
+import 'download_db.dart';
+import 'extraction_service.dart';
+import 'resource_monitor.dart';
+import 'speed_tracker.dart';
+
+/// Riverpod provider for the singleton [DownloadManager].
+final downloadManagerProvider = Provider<DownloadManager>((ref) {
+  final manager = DownloadManager(ref);
+  ref.onDispose(() => manager.dispose());
+  return manager;
+});
+
+class DownloadManager {
+  DownloadManager(this._ref) {
+    _db = DownloadDb();
+    _speed = SpeedTracker();
+    _resourceMonitor = ResourceMonitor(_ref);
+  }
+
+  final Ref _ref;
+  late final DownloadDb _db;
+  late final SpeedTracker _speed;
+  late final ResourceMonitor _resourceMonitor;
+  StreamSubscription<TdObject>? _tdlibSub;
+  bool _initialized = false;
+
+  final _queueChanged = StreamController<void>.broadcast();
+  Stream<void> get onQueueChanged => _queueChanged.stream;
+
+  DownloadDb get db => _db;
+  SpeedTracker get speedTracker => _speed;
+  ResourceMonitor get resourceMonitor => _resourceMonitor;
+
+  int get _maxConcurrent =>
+      _ref.read(settingsControllerProvider).concurrentDownloads;
+
+  // ── Lifecycle ────────────────────────────────────────────────
+
+  Future<void> initialize() async {
+    if (_initialized) return;
+    _initialized = true;
+
+    await _db.database;
+    await _db.resetStaleDownloads();
+
+    // Wire resource monitor callbacks.
+    _resourceMonitor.onConstraintViolated = _onResourceViolated;
+    _resourceMonitor.onConstraintRestored = _onResourceRestored;
+    await _resourceMonitor.start();
+
+    final client = _ref.read(tdlibClientProvider);
+    _tdlibSub = client.updates.listen(_onTdlibUpdate);
+
+    await _processQueue();
+    Log.info('DownloadManager initialized (max=$_maxConcurrent)',
+        tag: 'DL_MGR');
+  }
+
+  void dispose() {
+    _tdlibSub?.cancel();
+    _queueChanged.close();
+    _speed.dispose();
+    _resourceMonitor.dispose();
+    _db.close();
+  }
+
+  // ── Resource constraint callbacks ────────────────────────────
+
+  void _onResourceViolated(String reason) {
+    Log.info('Resource constraint: $reason — pausing all', tag: 'DL_MGR');
+    pauseAll();
+    BackgroundDownloadService.pushProgressToNotification(
+      activeCount: 0,
+      totalCount: 0,
+      overallProgress: 0,
+    );
+  }
+
+  void _onResourceRestored(String reason) {
+    Log.info('Resource restored: $reason — resuming', tag: 'DL_MGR');
+    resumeAll();
+  }
+
+  // ── App lifecycle hooks ──────────────────────────────────────
+
+  Future<void> onAppBackgrounded() async {
+    final active = await _db.activeCount();
+    if (active > 0) {
+      await BackgroundDownloadService.start();
+      _pushProgressToService();
+    }
+  }
+
+  Future<void> onAppResumed() async {
+    _notifyChange();
+    _resourceMonitor.recheck();
+    final active = await _db.activeCount();
+    final queued = (await _db.getByStatus(DownloadStatus.queued)).length;
+    if (active == 0 && queued == 0) {
+      await BackgroundDownloadService.stop();
+    }
+  }
+
+  // ── TDLib update handler ─────────────────────────────────────
+
+  void _onTdlibUpdate(TdObject event) {
+    if (event is UpdateFile) {
+      _handleFileUpdate(event.file);
+    }
+  }
+
+  Future<void> _handleFileUpdate(File file) async {
+    final item = await _db.getByFileId(file.id);
+    if (item == null) return;
+
+    final local = file.local;
+    final isComplete = local.isDownloadingCompleted;
+    final downloadedSize = local.downloadedSize;
+
+    _speed.reportProgress(file.id, downloadedSize);
+    _speed.computeSpeed(file.id, downloadedSize);
+
+    final newStatus = isComplete
+        ? DownloadStatus.completed
+        : (downloadedSize > 0
+            ? DownloadStatus.downloading
+            : item.status);
+
+    await _db.updateProgress(
+      file.id,
+      downloadedSize: downloadedSize,
+      status: newStatus,
+    );
+
+    _notifyChange();
+    _pushProgressToService();
+
+    if (isComplete) {
+      Log.tdlib('Download complete: fileId=${file.id}');
+      _speed.removeFile(file.id);
+
+      await _categorizeCompletedFile(item, local.path);
+
+      // Auto-extract if applicable.
+      await _autoExtractIfNeeded(item, local.path);
+
+      await _processQueue();
+
+      final remaining = await _db.activeCount();
+      final queued = (await _db.getByStatus(DownloadStatus.queued)).length;
+      if (remaining == 0 && queued == 0) {
+        _speed.stop();
+        await BackgroundDownloadService.stop();
+      }
+    }
+  }
+
+  // ── Public API ───────────────────────────────────────────────
+
+  /// Enqueue a download with smart de-duplication.
+  Future<bool> enqueue(DownloadItem item) async {
+    // ── De-duplication check ───────────────────────────────
+    // 1. Check if fileId already exists in DB.
+    final existing = await _db.getByFileId(item.fileId);
+    if (existing != null) {
+      if (existing.status == DownloadStatus.completed) {
+        // Already downloaded — skip re-download.
+        Log.info(
+          'De-dup: fileId=${item.fileId} already completed',
+          tag: 'DL_MGR',
+        );
+        return false; // signal "already exists"
+      }
+      // If queued/paused/error, just re-queue.
+      if (existing.status != DownloadStatus.downloading) {
+        await _db.updateStatus(item.fileId, DownloadStatus.queued);
+        _notifyChange();
+        await _processQueue();
+        return true;
+      }
+      return false; // already downloading
+    }
+
+    // 2. Check if a file with same size and name is already completed.
+    final allCompleted = await _db.getByStatus(DownloadStatus.completed);
+    for (final completed in allCompleted) {
+      if (completed.totalSize == item.totalSize &&
+          completed.fileName == item.fileName) {
+        // Check if the local file actually exists.
+        final localFile = IOFile(completed.localPath);
+        if (await localFile.exists()) {
+          Log.info(
+            'De-dup: "${item.fileName}" (${item.totalSize}B) matches '
+            'completed fileId=${completed.fileId}',
+            tag: 'DL_MGR',
+          );
+          // Insert as completed pointing to existing path.
+          await _db.insert(item.copyWith(
+            localPath: completed.localPath,
+            downloadedSize: completed.totalSize,
+            status: DownloadStatus.completed,
+          ));
+          _notifyChange();
+          return false; // signal "de-duped"
+        }
+      }
+    }
+
+    // ── Check resource constraints before enqueuing ─────────
+    if (_resourceMonitor.isPausedByResource) {
+      // Enqueue but don't start downloading.
+      await _db.insert(item.copyWith(status: DownloadStatus.paused));
+      _notifyChange();
+      return true;
+    }
+
+    // ── Normal enqueue ─────────────────────────────────────
+    await _db.insert(item);
+    _notifyChange();
+    await _processQueue();
+    return true;
+  }
+
+  Future<void> downloadFile(int fileId) async {
+    // Check resource constraints.
+    if (_resourceMonitor.isPausedByResource) return;
+
+    final send = _ref.read(tdlibSendProvider);
+    await _db.updateStatus(fileId, DownloadStatus.downloading);
+    _notifyChange();
+
+    _speed.start();
+
+    final result = await send(DownloadFile(
+      fileId: fileId,
+      priority: 1,
+      offset: 0,
+      limit: 0,
+      synchronous: false,
+    ));
+
+    _handleTdlibResult(fileId, result);
+
+    await BackgroundDownloadService.start();
+    _pushProgressToService();
+  }
+
+  Future<void> pauseDownload(int fileId) async {
+    final send = _ref.read(tdlibSendProvider);
+    await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+    await _db.updateStatus(fileId, DownloadStatus.paused);
+    _speed.removeFile(fileId);
+    _notifyChange();
+    _pushProgressToService();
+    await _processQueue();
+  }
+
+  Future<void> resumeDownload(int fileId) async {
+    if (_resourceMonitor.isPausedByResource) return;
+    await _db.updateStatus(fileId, DownloadStatus.queued);
+    _notifyChange();
+    await _processQueue();
+  }
+
+  Future<void> setPriority(int fileId, int priority) async {
+    await _db.updatePriority(fileId, priority);
+    _notifyChange();
+  }
+
+  Future<void> removeFromQueue(int fileId) async {
+    final item = await _db.getByFileId(fileId);
+    if (item != null && item.isActive) {
+      final send = _ref.read(tdlibSendProvider);
+      await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+      _speed.removeFile(fileId);
+    }
+    await _db.delete(fileId);
+    _notifyChange();
+    _pushProgressToService();
+    await _processQueue();
+  }
+
+  Future<void> pauseAll() async {
+    final active = await _db.getByStatus(DownloadStatus.downloading);
+    for (final item in active) {
+      await pauseDownload(item.fileId);
+    }
+  }
+
+  Future<void> resumeAll() async {
+    if (_resourceMonitor.isPausedByResource) return;
+    final paused = await _db.getByStatus(DownloadStatus.paused);
+    for (final item in paused) {
+      await _db.updateStatus(item.fileId, DownloadStatus.queued);
+    }
+    _notifyChange();
+    await _processQueue();
+  }
+
+  // ── Queue processor ──────────────────────────────────────────
+
+  Future<void> _processQueue() async {
+    if (_resourceMonitor.isPausedByResource) return;
+
+    final activeCount = await _db.activeCount();
+    final slotsAvailable = _maxConcurrent - activeCount;
+
+    if (slotsAvailable <= 0) return;
+
+    final next = await _db.nextQueued(limit: slotsAvailable);
+    for (final item in next) {
+      Log.tdlib('Starting download: fileId=${item.fileId}, '
+          'priority=${item.priority}');
+      await downloadFile(item.fileId);
+    }
+  }
+
+  // ── Smart categorization ─────────────────────────────────────
+
+  Future<void> _categorizeCompletedFile(
+      DownloadItem item, String sourcePath) async {
+    final settings = _ref.read(settingsControllerProvider);
+    if (!settings.smartCategorization) return;
+    if (sourcePath.isEmpty) return;
+
+    try {
+      final status = await Permission.storage.request();
+      if (!status.isGranted) {
+        final manageStatus =
+            await Permission.manageExternalStorage.request();
+        if (!manageStatus.isGranted) {
+          Log.error('Storage permission denied', tag: 'DL_MGR');
+          return;
+        }
+      }
+
+      final category = SettingsState.categoryForExtension(item.fileName);
+      final targetDir =
+          Directory('${settings.downloadBasePath}/$category');
+
+      if (!await targetDir.exists()) {
+        await targetDir.create(recursive: true);
+      }
+
+      final targetPath = '${targetDir.path}/${item.fileName}';
+      final sourceFile = IOFile(sourcePath);
+
+      if (await sourceFile.exists()) {
+        await sourceFile.copy(targetPath);
+        Log.info('Categorized: ${item.fileName} → $category/',
+            tag: 'DL_MGR');
+      }
+    } catch (e) {
+      Log.error('Failed to categorize file', error: e, tag: 'DL_MGR');
+    }
+  }
+
+  // ── Auto-extraction ──────────────────────────────────────────
+
+  Future<void> _autoExtractIfNeeded(
+      DownloadItem item, String sourcePath) async {
+    final settings = _ref.read(settingsControllerProvider);
+    if (!settings.autoExtractArchives) return;
+    if (!SettingsState.isArchive(item.fileName)) return;
+    if (sourcePath.isEmpty) return;
+
+    // Mark as extracting in DB — UI shows indeterminate progress.
+    await _db.updateStatusWithReason(
+        item.fileId, DownloadStatus.extracting, '');
+    _notifyChange();
+
+    // Determine target directory.
+    final baseName = item.fileName.contains('.')
+        ? item.fileName.substring(0, item.fileName.lastIndexOf('.'))
+        : item.fileName;
+    final targetDir = '${settings.downloadBasePath}/Archives/$baseName';
+
+    // Run extraction in a separate isolate.
+    // The isolate returns a typed result — it does NOT touch SQLite or Riverpod.
+    final result = await ExtractionService.extract(
+      sourcePath: sourcePath,
+      targetDir: targetDir,
+      deleteOriginalOnSuccess: true, // Phase 10: clean up original archive.
+    );
+
+    if (result.success) {
+      Log.info(
+        'Extracted ${result.extractedCount} files from ${item.fileName}'
+        '${result.originalDeleted ? ' (original deleted)' : ''}',
+        tag: 'DL_MGR',
+      );
+      // Clear any previous error reason and mark completed.
+      await _db.updateStatusWithReason(
+          item.fileId, DownloadStatus.completed, '');
+    } else {
+      // Phase 10: Map specific error types to persisted error reasons.
+      final reason = result.errorType.reason;
+      Log.error(
+        'Extraction failed [${result.errorType.name}] for ${item.fileName}: '
+        '${result.errorMessage}',
+        tag: 'DL_MGR',
+      );
+      // Set error status with specific reason for contextual UI badges.
+      await _db.updateStatusWithReason(
+          item.fileId, DownloadStatus.error, reason);
+    }
+
+    _notifyChange();
+  }
+
+  // ── Background service communication ─────────────────────────
+
+  Future<void> _pushProgressToService() async {
+    final all = await _db.getAll();
+    int active = 0;
+    int totalBytes = 0;
+    int downloadedBytes = 0;
+
+    for (final item in all) {
+      if (item.status == DownloadStatus.downloading) active++;
+      if (item.status != DownloadStatus.completed) {
+        totalBytes += item.totalSize;
+        downloadedBytes += item.downloadedSize;
+      }
+    }
+
+    final progress =
+        totalBytes > 0 ? (downloadedBytes / totalBytes).clamp(0.0, 1.0) : 0.0;
+
+    BackgroundDownloadService.pushProgressToNotification(
+      activeCount: active,
+      totalCount: all.length,
+      overallProgress: progress,
+    );
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────
+
+  void _handleTdlibResult(int fileId, TdObject? result) {
+    if (result is TdError) {
+      Log.error('TDLib download error for fileId=$fileId: '
+          '${result.code} ${result.message}');
+      _db.updateStatus(fileId, DownloadStatus.error);
+      _speed.removeFile(fileId);
+      _notifyChange();
+    }
+  }
+
+  void _notifyChange() {
+    if (!_queueChanged.isClosed) {
+      _queueChanged.add(null);
+    }
+  }
+}
+
+typedef IOFile = File;

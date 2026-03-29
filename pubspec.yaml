@@ -1,0 +1,65 @@
+name: telegram_downloader
+description: A modern, unofficial Telegram client for Android focused on advanced file downloading.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.4.0
+  flutter: '>=3.22.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Telegram MTProto via TDLib (Dart FFI wrapper)
+  tdlib: ^1.6.0
+
+  # State management
+  flutter_riverpod: ^3.3.1
+
+  # File system paths
+  path_provider: ^2.1.5
+
+  # Local database for download queue persistence
+  sqflite: ^2.4.2
+  path: ^1.9.0
+
+  # Background execution for active downloads
+  flutter_background_service: ^5.1.0
+  flutter_background_service_android: ^6.3.1
+
+  # Native file opening
+  open_filex: ^4.7.0
+
+  # User preferences persistence
+  shared_preferences: ^2.3.0
+
+  # Storage permissions
+  permission_handler: ^12.0.1
+
+  # Speed sparkline chart
+  fl_chart: ^0.69.0
+
+  # Native file sharing
+  share_plus: ^12.0.1
+
+  # Network connectivity monitoring
+  connectivity_plus: ^6.1.5
+
+  # Battery state monitoring
+  battery_plus: ^7.0.0
+
+  # Archive extraction (pure Dart — safe for compute() isolates)
+  archive: ^3.6.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets: []
+  # - assets/images/
