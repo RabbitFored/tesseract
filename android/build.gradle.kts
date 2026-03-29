@@ -16,15 +16,8 @@ subprojects {
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
 
-subprojects {
-    project.evaluationDependsOn(":app")
-}
-
-tasks.register<Delete>("clean") {
-    delete(rootProject.layout.buildDirectory)
-}
-
-// --- NEW FIX FOR TDLIB NAMESPACE CRASH ---
+// --- TDLIB NAMESPACE FIX ---
+// Placed strictly BEFORE evaluationDependsOn to prevent the "already evaluated" crash
 subprojects {
     afterEvaluate {
         if (extensions.findByName("android") != null) {
@@ -36,3 +29,12 @@ subprojects {
         }
     }
 }
+
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register<Delete>("clean") {
+    delete(rootProject.layout.buildDirectory)
+}
+
