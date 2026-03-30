@@ -73,6 +73,9 @@ jobs:
 
       # ── Build APK ─────────────────────────────────────────────
       - name: Build release APK
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ← auto-provided, no setup needed
         run: >
           flutter build apk --release --no-tree-shake-icons
           --dart-define=TELEGRAM_API_ID=${{ secrets.TELEGRAM_API_ID }}
