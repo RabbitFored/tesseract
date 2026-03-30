@@ -7,7 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 import 'core/tdlib/tdlib_client.dart';
-import 'features/downloader/data/background_service.dart';
+//import 'features/downloader/data/background_service.dart';
 import 'features/downloader/data/download_manager.dart';
 import 'features/settings/data/settings_controller.dart';
 
