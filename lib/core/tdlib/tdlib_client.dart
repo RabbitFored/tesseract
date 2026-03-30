@@ -81,6 +81,17 @@ class TdLibClient {
         ignoreFileNames: false,
       ),
     );
+      // ✅ NEW: Wait for TDLib to confirm it accepted the parameters
+  // before returning — without this the app hangs on the spinner.
+  await updates
+      .whereType<UpdateAuthorizationState>()
+      .first
+      .timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw TimeoutException(
+          'TDLib did not respond after SetTdlibParameters',
+        ),
+      );
   }
 
   /// Send a TDLib function asynchronously.
