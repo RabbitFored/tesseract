@@ -65,8 +65,3 @@ android {
 flutter {
     source = "../.."
 }
-
-dependencies {
-    // TDLib prebuilt native .so — version must match tdlib pub package (^1.6.0)
-    implementation("io.github.up9cloud:td:1.8.52")
-}
