@@ -2,16 +2,6 @@ allprojects {
     repositories {
         google()
         mavenCentral()
-        maven {
-            name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/up9cloud/android-libtdjson")
-            credentials {
-                username = System.getenv("GITHUB_ACTOR")
-                    ?: (project.findProperty("gpr.user") as String? ?: "")
-                password = System.getenv("GITHUB_TOKEN")
-                    ?: (project.findProperty("gpr.key") as String? ?: "")
-            }
-        }
     }
 }
 
