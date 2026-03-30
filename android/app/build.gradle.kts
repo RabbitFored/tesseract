@@ -3,11 +3,9 @@ import java.util.Properties
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// ── Read key.properties (CI writes this; absent in local dev) ─────────────
 val keyPropertiesFile = rootProject.file("key.properties")
 val keyProperties = Properties()
 if (keyPropertiesFile.exists()) {
@@ -45,12 +43,16 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Only package arm64-v8a — covers all modern Android phones.
+        // Add "armeabi-v7a" here if you need older device support.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
         release {
-            // Use the release signing config when key.properties is present (CI / prod);
-            // fall back to debug keys for local development.
             signingConfig = if (keyPropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
@@ -64,3 +66,7 @@ flutter {
     source = "../.."
 }
 
+dependencies {
+    // TDLib prebuilt native .so — version must match tdlib pub package (^1.6.0)
+    implementation("io.github.up9cloud:td:1.6.0")
+}
