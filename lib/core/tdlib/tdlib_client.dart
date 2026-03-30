@@ -43,7 +43,7 @@ class TdLibClient {
   Future<void> initialize() async {
     // Register FFI plugin before anything else
     td_real.TdNativePlugin.registerWith();
-    await td_plugin.TdPlugin.initialize!();
+    await td_plugin.TdPlugin.initialize();
 
     // Initialize the shared EventSubject isolate
     await EventSubject.initialize();
