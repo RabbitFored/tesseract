@@ -46,7 +46,7 @@ class TdLibClient {
     await td_plugin.TdPlugin.initialize('libtdjson.so');
 
     // Initialize the shared EventSubject isolate
-    await EventSubject.initialize();
+    await EventSubject.initialize(libPath: 'libtdjson.so');
 
     _clientId = tdCreate();
     // Forward updates for our client to the broadcast stream.
