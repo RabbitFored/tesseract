@@ -123,8 +123,6 @@ class _AppBootstrapState extends ConsumerState<_AppBootstrap>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // Close TDLib cleanly so its SQLite DB is not left locked on next launch.
-    _tdClient?.close();
     super.dispose();
   }
 
