@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:isolate';
 import 'dart:ui';
 
@@ -10,40 +11,22 @@ import 'features/downloader/data/background_service.dart';
 import 'features/downloader/data/download_manager.dart';
 import 'features/settings/data/settings_controller.dart';
 
-/// Port name registered in [IsolateNameServer] so the background isolate
-/// can locate and send messages to the main isolate's [ReceivePort].
 const String kMainIsolatePortName = 'tg_downloader_main_port';
-
-/// Port name the background isolate registers so the main isolate can
-/// push download-progress updates to the foreground notification.
 const String kBackgroundPortName = 'tg_downloader_bg_port';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // ── 1. Register main-isolate receive port ────────────────────
   _registerMainPort();
 
-  // ── 2. Initialize background keep-alive service ──────────────
-  await BackgroundDownloadService.initialize();
-
-  // ── 3. Initialize TDLib in the main isolate (sole owner) ─────
-  final tdClient = TdLibClient();
-  await tdClient.initialize();
-
-  // ── 4. Launch the widget tree with Riverpod injection ────────
+  // Run the app FIRST — heavy init happens inside the widget tree
+  // so the OS launch screen transitions immediately to a Flutter frame.
   runApp(
-    ProviderScope(
-      overrides: [
-        tdlibClientProvider.overrideWithValue(tdClient),
-      ],
-      child: const _AppBootstrap(),
+    const ProviderScope(
+      child: _AppBootstrap(),
     ),
   );
 }
 
-/// Registers a [ReceivePort] in [IsolateNameServer] so the background
-/// isolate can reach the main isolate.
 void _registerMainPort() {
   IsolateNameServer.removePortNameMapping(kMainIsolatePortName);
 
@@ -87,27 +70,67 @@ class _AppBootstrap extends ConsumerStatefulWidget {
 
 class _AppBootstrapState extends ConsumerState<_AppBootstrap>
     with WidgetsBindingObserver {
+  TdLibClient? _tdClient;
+  Object? _initError;
+  bool _ready = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _initialize();
+  }
 
-    Future.microtask(() async {
-      // Initialize settings first (DownloadManager reads concurrency from it).
+  Future<void> _initialize() async {
+    // Clear any previous error before retrying.
+    if (mounted) setState(() => _initError = null);
+
+    try {
+      debugPrint('[Bootstrap] Starting BackgroundDownloadService...');
+      await BackgroundDownloadService.initialize()
+          .timeout(const Duration(seconds: 10));
+      debugPrint('[Bootstrap] BackgroundDownloadService ready.');
+
+      debugPrint('[Bootstrap] Starting TdLibClient...');
+      final tdClient = TdLibClient();
+      await tdClient.initialize()
+          .timeout(const Duration(seconds: 20));
+      debugPrint('[Bootstrap] TdLibClient ready.');
+
+      debugPrint('[Bootstrap] Initializing settings...');
       await ref.read(settingsControllerProvider.notifier).initialize();
-      // Then initialize the download manager.
+
+      debugPrint('[Bootstrap] Initializing DownloadManager...');
       await ref.read(downloadManagerProvider).initialize();
-    });
+
+      debugPrint('[Bootstrap] All init done. Launching app.');
+
+      if (mounted) {
+        setState(() {
+          _tdClient = tdClient;
+          _ready = true;
+        });
+      }
+    } on TimeoutException catch (e) {
+      debugPrint('[Bootstrap] Timeout during init: $e');
+      if (mounted) setState(() => _initError = 'Initialization timed out.\n$e');
+    } catch (e, st) {
+      debugPrint('[Bootstrap] Error during init: $e\n$st');
+      if (mounted) setState(() => _initError = e);
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Close TDLib cleanly so its SQLite DB is not left locked on next launch.
+    _tdClient?.close();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_ready) return;
     final manager = ref.read(downloadManagerProvider);
 
     switch (state) {
@@ -123,6 +146,57 @@ class _AppBootstrapState extends ConsumerState<_AppBootstrap>
 
   @override
   Widget build(BuildContext context) {
-    return const TelegramDownloaderApp();
+    // ── Error state ───────────────────────────────────────────────
+    if (_initError != null) {
+      return MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Failed to start',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$_initError',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: _initialize,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // ── Loading state ─────────────────────────────────────────────
+    if (!_ready) {
+      return const MaterialApp(
+        home: Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    // ── App ready ─────────────────────────────────────────────────
+    return ProviderScope(
+      overrides: [
+        tdlibClientProvider.overrideWithValue(_tdClient!),
+      ],
+      child: const TelegramDownloaderApp(),
+    );
   }
 }
