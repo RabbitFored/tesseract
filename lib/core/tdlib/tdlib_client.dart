@@ -8,8 +8,10 @@ import 'package:tdlib/td_api.dart';
 import 'package:tdlib/td_client.dart';
 
 import '../constants/app_constants.dart';
-import 'package:tdlib/src/tdclient/platform_interfaces/td_native_plugin_real.dart';
-import 'package:tdlib/src/tdclient/platform_interfaces/td_plugin.dart';
+import 'package:tdlib/src/tdclient/platform_interfaces/td_native_plugin_real.dart'
+    as td_real;
+import 'package:tdlib/src/tdclient/platform_interfaces/td_plugin.dart'
+    as td_plugin;
 
 // Re-export TdObject so other files can import it from this file if needed.
 export 'package:tdlib/td_api.dart' show TdObject, TdFunction, TdError;
@@ -39,16 +41,14 @@ class TdLibClient {
 
   /// Create the native TDLib client and configure database parameters.
   Future<void> initialize() async {
-    // Register the FFI plugin — MUST be called before anything else.
-    // Without this, TdPlugin.initialize is null and the stub is used instead.
-    TdNativePlugin.registerWith();
-    await TdPlugin.initialize!();
+    // Register FFI plugin before anything else
+    td_real.TdNativePlugin.registerWith();
+    await td_plugin.TdPlugin.initialize!();
 
-    // Initialize the shared EventSubject isolate (safe to call multiple times).
+    // Initialize the shared EventSubject isolate
     await EventSubject.initialize();
 
     _clientId = tdCreate();
-
     // Forward updates for our client to the broadcast stream.
     EventSubject.instance.listen(_clientId).listen((event) {
       if (!_updateController.isClosed) {
