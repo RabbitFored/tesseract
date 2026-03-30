@@ -78,7 +78,7 @@ class _AppBootstrapState extends State<_AppBootstrap> {
     _initialize();
   }
 
-  /*
+  
 
   Future<void> _initialize() async {
     if (mounted) {
@@ -125,16 +125,8 @@ class _AppBootstrapState extends State<_AppBootstrap> {
       }
     }
   }
-  */
-  Future<void> _initialize() async {
-    // TODO: re-enable TDLib init once native .so issue is resolved
-    if (mounted) {
-      setState(() {
-        _tdClient = TdLibClient(); // uninitialized dummy — UI only
-        _ready = true;
-      });
-    }
-  }
+  
+  
 
   @override
   Widget build(BuildContext context) {
@@ -225,26 +217,13 @@ class _AppInnerState extends ConsumerState<_AppInner>
     WidgetsBinding.instance.addObserver(this);
     _initProviders();
   }
-/*
+
   Future<void> _initProviders() async {
     debugPrint('[AppInner] Initializing settings...');
     await ref.read(settingsControllerProvider.notifier).initialize();
     debugPrint('[AppInner] Initializing DownloadManager...');
     await ref.read(downloadManagerProvider).initialize();
     debugPrint('[AppInner] All providers ready.');
-    if (mounted) setState(() => _providersReady = true);
-  }
-*/
-  Future<void> _initProviders() async {
-    try {
-      debugPrint('[AppInner] Initializing settings...');
-      await ref.read(settingsControllerProvider.notifier).initialize();
-      debugPrint('[AppInner] Initializing DownloadManager...');
-      await ref.read(downloadManagerProvider).initialize();
-      debugPrint('[AppInner] All providers ready.');
-    } catch (e) {
-      debugPrint('[AppInner] Provider init skipped (UI-only mode): $e');
-    }
     if (mounted) setState(() => _providersReady = true);
   }
   
