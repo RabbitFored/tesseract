@@ -114,6 +114,7 @@ class _AppBootstrapState extends State<_AppBootstrap> {
       }
     } catch (e, st) {
       debugPrint('[Bootstrap] Error: $e\n$st');
+      if (mounted) setState(() => _initError = '$e\n\n$st');  // <-- add st here
       if (mounted) {
         setState(() {
           _initError = e;
