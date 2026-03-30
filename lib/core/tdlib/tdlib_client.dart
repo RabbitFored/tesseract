@@ -30,7 +30,7 @@ class TdLibClient {
 
   Future<void> initialize() async {
     // No arguments on Android — .so is bundled by the plugin automatically
-    await TdPlugin.initialize();
+    await TdPlugin.initialize('libtdjson.so');
 
     // Initialize the shared EventSubject isolate
     await EventSubject.initialize();
