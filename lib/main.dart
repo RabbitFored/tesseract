@@ -107,14 +107,18 @@ class _AppBootstrapState extends State<_AppBootstrap> {
         });
       }
     } on TimeoutException catch (e, st) {
-      debugPrint('[Bootstrap] Timeout: $e\n$st');
-      if (mounted) {
-        setState(() {
-          _initError = 'Initialization timed out.\n$e';
-          _initStack = st;
-        });
-      }
-    } catch (e, st) {
+  debugPrint('[Bootstrap] Timeout: $e\n$st');
+  if (mounted) {
+    setState(() {
+      _initError = 'Initialization timed out. TDLib did not respond.\n\n'
+          'Check that:\n'
+          '• libtdjson.so is bundled in the APK\n'
+          '• TELEGRAM_API_ID and TELEGRAM_API_HASH are correct\n\n'
+          'Error: $e';
+      _initStack = st;
+    });
+  }
+} catch (e, st) {
       debugPrint('[Bootstrap] Error: $e\n$st');
       if (mounted) setState(() => _initError = '$e\n\n$st');  // <-- add st here
       if (mounted) {
