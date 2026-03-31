@@ -29,56 +29,63 @@ class TdLibClient {
   bool get isInitialized => _clientId != 0;
 
   Future<void> initialize() async {
-    // No arguments on Android — .so is bundled by the plugin automatically
-    await TdPlugin.initialize('libtdjson.so');
+  // Register FFI plugin before anything else
+  td_real.TdNativePlugin.registerWith();
+  await td_plugin.TdPlugin.initialize('libtdjson.so');
 
-    // Initialize the shared EventSubject isolate
-    await EventSubject.initialize();
+  // Initialize the shared EventSubject isolate
+  await EventSubject.initialize();
 
-    _clientId = tdCreate();
+  _clientId = tdCreate();
 
-    EventSubject.instance.listen(_clientId).listen((event) {
-      if (!_updateController.isClosed) {
-        _updateController.add(event);
-      }
-    });
+  // Forward updates for our client to the broadcast stream.
+  EventSubject.instance.listen(_clientId).listen((event) {
+    if (!_updateController.isClosed) {
+      _updateController.add(event);
+    }
+  });
 
-    final appDir = await getApplicationDocumentsDirectory();
-    final tdlibDir = '${appDir.path}/tdlib';
+  final appDir = await getApplicationDocumentsDirectory();
+  final tdlibDir = '${appDir.path}/tdlib';
 
-    tdSend(
-      _clientId,
-      SetTdlibParameters(
-        useTestDc: false,
-        databaseDirectory: tdlibDir,
-        filesDirectory: '$tdlibDir/files',
-        databaseEncryptionKey: '',
-        useFileDatabase: true,
-        useChatInfoDatabase: true,
-        useMessageDatabase: true,
-        useSecretChats: false,
-        apiId: AppConstants.telegramApiId,
-        apiHash: AppConstants.telegramApiHash,
-        systemLanguageCode: 'en',
-        deviceModel: 'Android',
-        systemVersion: '14',
-        applicationVersion: AppConstants.appVersion,
-        enableStorageOptimizer: true,
-        ignoreFileNames: false,
-      ),
-    );
+  // ✅ Attach the listener BEFORE sending — prevents the race condition
+  // where UpdateAuthorizationState arrives before .first is subscribed.
+  final authStateReceived = updates
+      .where((e) => e is UpdateAuthorizationState)
+      .first
+      .timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw TimeoutException(
+          'TDLib did not respond after SetTdlibParameters',
+        ),
+      );
 
-    // Wait for TDLib to confirm parameters were accepted before returning
-    await updates
-        .where((e) => e is UpdateAuthorizationState)
-        .first
-        .timeout(
-          const Duration(seconds: 15),
-          onTimeout: () => throw TimeoutException(
-            'TDLib did not respond after SetTdlibParameters',
-          ),
-        );
-  }
+  // Send AFTER the listener is ready
+  tdSend(
+    _clientId,
+    SetTdlibParameters(
+      useTestDc: false,
+      databaseDirectory: tdlibDir,
+      filesDirectory: '$tdlibDir/files',
+      databaseEncryptionKey: '',
+      useFileDatabase: true,
+      useChatInfoDatabase: true,
+      useMessageDatabase: true,
+      useSecretChats: false,
+      apiId: AppConstants.telegramApiId,
+      apiHash: AppConstants.telegramApiHash,
+      systemLanguageCode: 'en',
+      deviceModel: 'Android',
+      systemVersion: '14',
+      applicationVersion: AppConstants.appVersion,
+      enableStorageOptimizer: true,
+      ignoreFileNames: false,
+    ),
+  );
+
+  // Now await — listener was already subscribed before tdSend fired
+  await authStateReceived;
+}
 
   Future<TdObject?> send(TdFunction function) async {
     if (_clientId == 0) return null;
