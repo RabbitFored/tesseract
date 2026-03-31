@@ -13,7 +13,7 @@ dependencies:
   cupertino_icons: ^1.0.8
 
   # Telegram MTProto via TDLib (Dart FFI wrapper)
-  tdlib: ^1.6.0
+  handy_tdlib: ^2.1.0
 
   # State management
   flutter_riverpod: ^3.3.1
