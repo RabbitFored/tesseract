@@ -190,11 +190,19 @@ class _AppBootstrapState extends State<_AppBootstrap> {
     }
 
     // ── TdLibClient is live — set override, mount stage-2 widget ─
+    // We also override downloadManagerProvider so that its internal Ref
+    // resolves tdlibClientProvider from THIS scope (with the override),
+    // not the root scope where the provider throws UnimplementedError.
     return ProviderScope(
       overrides: [
         tdlibClientProvider.overrideWithValue(_tdClient!),
+        downloadManagerProvider.overrideWith((ref) {
+          final manager = DownloadManager(ref);
+          ref.onDispose(() => manager.dispose());
+          return manager;
+        }),
       ],
-      child: const _AppInner(),
+      child: _AppInner(tdClient: _tdClient!),
     );
   }
 }
@@ -205,7 +213,9 @@ class _AppBootstrapState extends State<_AppBootstrap> {
 // so settingsController and downloadManager can be safely initialized.
 
 class _AppInner extends ConsumerStatefulWidget {
-  const _AppInner();
+  const _AppInner({required this.tdClient});
+
+  final TdLibClient tdClient;
 
   @override
   ConsumerState<_AppInner> createState() => _AppInnerState();
