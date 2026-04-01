@@ -97,7 +97,7 @@ class _AppBootstrapState extends State<_AppBootstrap> {
       debugPrint('[Bootstrap] Starting TdLibClient...');
       final tdClient = TdLibClient();
       await tdClient.initialize()
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 45));
       debugPrint('[Bootstrap] TdLibClient ready.');
 
       if (mounted) {

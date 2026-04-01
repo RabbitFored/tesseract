@@ -45,23 +45,50 @@ class TdLibClient {
   /// Completes only after TDLib has acknowledged [SetTdlibParameters]
   /// by emitting an [UpdateAuthorizationState].
   Future<void> initialize() async {
+    debugPrint('[TdLibClient] Registering FFI plugin...');
     // Register FFI plugin before anything else
     td_real.TdNativePlugin.registerWith();
     await td_plugin.TdPlugin.initialize('libtdjson.so');
+    debugPrint('[TdLibClient] FFI plugin ready.');
 
     _clientId = tdCreate();
-    debugPrint('[TdLibClient] Created client id=$_clientId');
+    debugPrint('[TdLibClient] Created native client id=$_clientId');
 
-    // Start polling for TDLib events on the main isolate.
-    // 50ms interval gives responsive event delivery without excessive CPU.
-    _receiveTimer = Timer.periodic(
-      const Duration(milliseconds: 50),
-      (_) => _pollReceive(),
-    );
+    // Start the receive loop BEFORE sending any request, so we never
+    // miss an event that arrives between tdSend() and the await below.
+    _startReceiveLoop();
+    debugPrint('[TdLibClient] Receive loop started.');
+
+    // Set up the auth-state future BEFORE sending SetTdlibParameters to
+    // avoid a race condition on the broadcast stream.
+    final authStateFuture = updates
+        .where((e) {
+          debugPrint('[TdLibClient] Received update: ${e.runtimeType}');
+          return e is UpdateAuthorizationState;
+        })
+        .first
+        .timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            debugPrint(
+              '[TdLibClient] TIMEOUT waiting for UpdateAuthorizationState!',
+            );
+            throw TimeoutException(
+              'TDLib did not respond after SetTdlibParameters',
+            );
+          },
+        );
 
     // Point TDLib at a persistent directory for its database files.
     final appDir = await getApplicationDocumentsDirectory();
     final tdlibDir = '${appDir.path}/tdlib';
+    debugPrint('[TdLibClient] DB dir: $tdlibDir');
+
+    debugPrint('[TdLibClient] Sending SetTdlibParameters...');
+    debugPrint(
+      '[TdLibClient] API_ID=${AppConstants.telegramApiId} '
+      'API_HASH=${AppConstants.telegramApiHash.isEmpty ? "(EMPTY)" : "(set)"}',
+    );
 
     tdSend(
       _clientId,
@@ -84,25 +111,33 @@ class TdLibClient {
         ignoreFileNames: false,
       ),
     );
+    debugPrint('[TdLibClient] SetTdlibParameters sent. Awaiting auth state...');
 
-    // Wait for TDLib to process SetTdlibParameters and emit an auth state.
-    debugPrint('[TdLibClient] Waiting for TDLib auth state acknowledgment...');
-    await updates
-        .where((e) => e is UpdateAuthorizationState)
-        .first
-        .timeout(const Duration(seconds: 15));
-    debugPrint('[TdLibClient] TDLib acknowledged SetTdlibParameters.');
+    // Await TDLib's acknowledgment (future was set up before tdSend).
+    await authStateFuture;
+    debugPrint('[TdLibClient] Initialization complete!');
+  }
+
+  /// Start a periodic timer that polls TDLib for pending events.
+  void _startReceiveLoop() {
+    _receiveTimer = Timer.periodic(
+      const Duration(milliseconds: 50),
+      (_) => _pollReceive(),
+    );
   }
 
   /// Poll TDLib for pending events (called by the periodic timer).
   void _pollReceive() {
     if (_clientId == 0) return;
 
-    // Use a very short timeout (0) so this never blocks the UI thread.
-    // The timer interval (50ms) provides the actual polling cadence.
+    // tdReceive with timeout=0 returns immediately if nothing is available.
+    // The 50ms timer interval provides the actual polling cadence.
     final result = tdReceive(0);
-    if (result != null && !_updateController.isClosed) {
-      _updateController.add(result);
+    if (result != null) {
+      debugPrint('[TdLibClient] tdReceive got: ${result.runtimeType}');
+      if (!_updateController.isClosed) {
+        _updateController.add(result);
+      }
     }
   }
 
