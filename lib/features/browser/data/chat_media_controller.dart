@@ -311,7 +311,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       if (msgs.isEmpty) break;
 
       for (final msg in msgs) {
-        final media = _extractMedia(msg);
+        final media = MediaMessage.fromTdlibMessage(msg);
         if (media != null) collected.add(media);
       }
 
@@ -323,104 +323,5 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
     }
 
     return collected;
-  }
-
-  /// Extract a [MediaMessage] from a TDLib [Message], or null if
-  /// the message has no downloadable media.
-  MediaMessage? _extractMedia(Message msg) {
-    final content = msg.content;
-
-    return switch (content) {
-      MessageDocument(document: final doc, caption: final cap) => MediaMessage(
-          messageId: msg.id,
-          chatId: _chatId,
-          fileId: doc.document.id,
-          fileName: doc.fileName,
-          fileSize: doc.document.expectedSize,
-          mediaType: MediaType.document,
-          mimeType: doc.mimeType,
-          caption: cap.text,
-          date: msg.date,
-        ),
-      MessageVideo(video: final vid, caption: final cap) => MediaMessage(
-          messageId: msg.id,
-          chatId: _chatId,
-          fileId: vid.video.id,
-          fileName: vid.fileName.isNotEmpty
-              ? vid.fileName
-              : 'video_${msg.id}.mp4',
-          fileSize: vid.video.expectedSize,
-          mediaType: MediaType.video,
-          mimeType: vid.mimeType,
-          caption: cap.text,
-          date: msg.date,
-          thumbnailFileId: vid.thumbnail?.file.id,
-        ),
-      MessageAudio(audio: final aud, caption: final cap) => MediaMessage(
-          messageId: msg.id,
-          chatId: _chatId,
-          fileId: aud.audio.id,
-          fileName: aud.fileName.isNotEmpty
-              ? aud.fileName
-              : '${aud.title.isNotEmpty ? aud.title : 'audio_${msg.id}'}.mp3',
-          fileSize: aud.audio.expectedSize,
-          mediaType: MediaType.audio,
-          mimeType: aud.mimeType,
-          caption: cap.text,
-          date: msg.date,
-          thumbnailFileId: aud.albumCoverThumbnail?.file.id,
-        ),
-      MessagePhoto(photo: final photo, caption: final cap) => () {
-          final sizes = photo.sizes;
-          if (sizes.isEmpty) return null;
-          final largest = sizes.last;
-          return MediaMessage(
-            messageId: msg.id,
-            chatId: _chatId,
-            fileId: largest.photo.id,
-            fileName: 'photo_${msg.id}.jpg',
-            fileSize: largest.photo.expectedSize,
-            mediaType: MediaType.photo,
-            caption: cap.text,
-            date: msg.date,
-          );
-        }(),
-      MessageAnimation(animation: final anim, caption: final cap) => MediaMessage(
-          messageId: msg.id,
-          chatId: _chatId,
-          fileId: anim.animation.id,
-          fileName: anim.fileName.isNotEmpty
-              ? anim.fileName
-              : 'animation_${msg.id}.mp4',
-          fileSize: anim.animation.expectedSize,
-          mediaType: MediaType.animation,
-          mimeType: anim.mimeType,
-          caption: cap.text,
-          date: msg.date,
-          thumbnailFileId: anim.thumbnail?.file.id,
-        ),
-      MessageVoiceNote(voiceNote: final vn, caption: final cap) => MediaMessage(
-          messageId: msg.id,
-          chatId: _chatId,
-          fileId: vn.voice.id,
-          fileName: 'voice_${msg.id}.ogg',
-          fileSize: vn.voice.expectedSize,
-          mediaType: MediaType.voiceNote,
-          mimeType: vn.mimeType,
-          caption: cap.text,
-          date: msg.date,
-        ),
-      MessageVideoNote(videoNote: final vn) => MediaMessage(
-          messageId: msg.id,
-          chatId: _chatId,
-          fileId: vn.video.id,
-          fileName: 'videonote_${msg.id}.mp4',
-          fileSize: vn.video.expectedSize,
-          mediaType: MediaType.videoNote,
-          date: msg.date,
-          thumbnailFileId: vn.thumbnail?.file.id,
-        ),
-      _ => null,
-    };
   }
 }

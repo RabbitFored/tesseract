@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' as io;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:tdlib/td_api.dart';
 
@@ -10,6 +11,7 @@ import '../../../core/tdlib/tdlib_provider.dart';
 import '../../../core/utils/logger.dart';
 import '../../settings/data/settings_controller.dart';
 import '../../settings/domain/settings_state.dart';
+import '../../browser/domain/media_message.dart';
 import '../domain/download_item.dart';
 import '../domain/download_status.dart';
 import 'background_service.dart';
@@ -234,6 +236,52 @@ class DownloadManager {
     _notifyChange();
     await _processQueue();
     return true;
+  }
+
+  /// Enqueue a download from a Telegram message link.
+  /// Returns null on success, or an error message if it fails.
+  Future<String?> enqueueFromUrl(String url) async {
+    final send = _ref.read(tdlibSendProvider);
+    
+    // ignore: prefer_const_constructors
+    final linkInfoResult = await send(GetMessageLinkInfo(url: url));
+    
+    if (linkInfoResult is TdError) {
+      return linkInfoResult.message;
+    }
+    
+    if (linkInfoResult is! MessageLinkInfo) {
+      return 'Invalid link';
+    }
+
+    final message = linkInfoResult.message;
+
+    if (message == null) {
+      return 'Message not accessible. Please ensure you have access to the chat.';
+    }
+
+    final media = MediaMessage.fromTdlibMessage(message);
+    if (media == null) {
+      return 'No downloadable media found in this message';
+    }
+
+    final appDir = await getApplicationDocumentsDirectory();
+    final localPath = '${appDir.path}/downloads/${media.fileName}';
+
+    final enqueued = await enqueue(DownloadItem(
+      fileId: media.fileId,
+      localPath: localPath,
+      totalSize: media.fileSize,
+      fileName: media.fileName,
+      chatId: media.chatId,
+      messageId: media.messageId,
+    ));
+
+    if (!enqueued) {
+      return 'File is already in the queue or downloaded';
+    }
+
+    return null; // Success
   }
 
   Future<void> downloadFile(int fileId) async {

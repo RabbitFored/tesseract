@@ -9,6 +9,7 @@ import 'widgets/download_item_card.dart';
 import 'widgets/shared_widgets.dart';
 import '../../browser/presentation/chat_list_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
+import 'widgets/add_link_dialog.dart';
 import 'widgets/stats_header.dart';
 
 /// Main dashboard screen with TabBar separating Active/Queued from Completed.
@@ -75,12 +76,54 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
         floatingActionButton: FloatingActionButton.extended(
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const ChatListScreen(),
-            ),
-          ),
+          onPressed: () {
+            showModalBottomSheet(
+              context: context,
+              builder: (ctx) => SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.folder_open_rounded),
+                      title: const Text('Browse Chats'),
+                      subtitle: const Text('Find files in your Telegram chats'),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ChatListScreen(),
+                          ),
+                        );
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.link_rounded),
+                      title: const Text('Paste Link'),
+                      subtitle: const Text('Download from a Telegram message link'),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        showDialog(
+                          context: context,
+                          builder: (_) => const AddLinkDialog(),
+                        ).then((added) {
+                          if (added == true && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Downloading file from link'),
+                                backgroundColor: Color(0xFF2AABEE),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
           icon: const Icon(Icons.add_rounded),
           label: const Text('Add Download'),
           backgroundColor: const Color(0xFF2AABEE),
