@@ -54,7 +54,19 @@ class ChatListController extends StateNotifier<ChatListState> {
     try {
       final send = _ref.read(tdlibSendProvider);
 
-      // TDLib getChats returns a list of chat IDs ordered by last message.
+      // In TDLib 1.6.0, GetChats only returns locally cached chats.
+      // We must call LoadChats first to fetch them from the server.
+      // ignore: prefer_const_constructors
+      final loadResult = await send(LoadChats(
+        chatList: null,
+        limit: _pageSize,
+      ));
+
+      if (loadResult is TdError && loadResult.code != 404) {
+        state = state.copyWith(isLoading: false, error: loadResult.message);
+        return;
+      }
+
       // ignore: prefer_const_constructors
       final result = await send(GetChats(
         chatList: null, // main chat list
@@ -93,11 +105,22 @@ class ChatListController extends StateNotifier<ChatListState> {
     try {
       final send = _ref.read(tdlibSendProvider);
 
+      // ignore: prefer_const_constructors
+      final loadResult = await send(LoadChats(
+        chatList: null,
+        limit: _pageSize,
+      ));
+
+      if (loadResult is TdError && loadResult.code != 404) {
+        state = state.copyWith(isLoading: false);
+        return;
+      }
+
       // Use the last chat's order as offset for pagination.
       // ignore: prefer_const_constructors
       final result = await send(GetChats(
         chatList: null,
-        limit: _pageSize,
+        limit: state.chats.length + _pageSize, // GetChats returns from the beginning, so we need to request all + page size
       ));
 
       if (result is Chats) {
