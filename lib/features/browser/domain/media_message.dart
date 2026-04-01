@@ -116,18 +116,7 @@ class MediaMessage {
       _ => null,
     };
   }
-  const MediaMessage({
-    required this.messageId,
-    required this.chatId,
-    required this.fileId,
-    required this.fileName,
-    required this.fileSize,
-    required this.mediaType,
-    this.mimeType = '',
-    this.caption = '',
-    this.date = 0,
-    this.thumbnailFileId,
-  });
+
 
   final int messageId;
   final int chatId;

@@ -7,8 +7,10 @@ import 'package:tdlib/td_api.dart';
 import 'package:tdlib/td_client.dart';
 
 import '../constants/app_constants.dart';
+// ignore: implementation_imports
 import 'package:tdlib/src/tdclient/platform_interfaces/td_native_plugin_real.dart'
     as td_real;
+// ignore: implementation_imports
 import 'package:tdlib/src/tdclient/platform_interfaces/td_plugin.dart'
     as td_plugin;
 

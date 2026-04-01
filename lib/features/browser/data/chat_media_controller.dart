@@ -268,7 +268,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       if (msgs.isEmpty) break;
 
       for (final msg in msgs) {
-        final media = _extractMedia(msg);
+        final media = MediaMessage.fromTdlibMessage(msg);
         if (media != null) collected.add(media);
       }
 
