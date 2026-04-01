@@ -74,6 +74,18 @@ class DashboardScreen extends ConsumerWidget {
             ),
           ],
         ),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const ChatListScreen(),
+            ),
+          ),
+          icon: const Icon(Icons.add_rounded),
+          label: const Text('Add Download'),
+          backgroundColor: const Color(0xFF2AABEE),
+          foregroundColor: Colors.white,
+        ),
       ),
     );
   }
