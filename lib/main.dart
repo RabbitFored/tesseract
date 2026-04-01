@@ -20,9 +20,7 @@ Future<void> main() async {
 
   // runApp immediately — all heavy init happens inside the widget tree.
   runApp(
-    const ProviderScope(
-      child: _AppBootstrap(),
-    ),
+    const _AppBootstrap(),
   );
 }
 
