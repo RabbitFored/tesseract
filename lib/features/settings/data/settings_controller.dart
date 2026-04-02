@@ -31,8 +31,9 @@ class SettingsController extends StateNotifier<SettingsState> {
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
 
-    final appDir = await getApplicationDocumentsDirectory();
-    final basePath = '${appDir.path}/downloads';
+    // Default to the public Android Downloads folder so files can be shared
+    final basePath = _prefs?.getString('custom_download_path') ?? 
+        '/storage/emulated/0/Download/Tesseract';
 
     state = SettingsState(
       concurrentDownloads:
@@ -93,5 +94,10 @@ class SettingsController extends StateNotifier<SettingsState> {
       return '${state.downloadBasePath}/$category/$fileName';
     }
     return '${state.downloadBasePath}/$fileName';
+  }
+
+  Future<void> setDownloadPath(String path) async {
+    await _prefs?.setString('custom_download_path', path);
+    state = state.copyWith(downloadBasePath: path);
   }
 }

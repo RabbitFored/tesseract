@@ -166,10 +166,20 @@ class DownloadManager {
       Log.tdlib('Download complete: fileId=${file.id} path=${local.path}');
       _speed.removeFile(file.id);
 
-      await _categorizeCompletedFile(item, local.path);
-
-      // Auto-extract if applicable.
-      await _autoExtractIfNeeded(item, local.path);
+      // Copy the file to the user-accessible Downloads folder and update DB.
+      final publicPath = await _exportCompletedFile(item, local.path);
+      if (publicPath != null) {
+        await _db.updateProgressAndPath(
+          item.fileId,
+          downloadedSize: item.totalSize,
+          status: DownloadStatus.completed,
+          localPath: publicPath,
+        );
+        // Also pass publicPath to auto-extractor so it extracts to the correct base.
+        await _autoExtractIfNeeded(item, publicPath);
+      } else {
+        await _autoExtractIfNeeded(item, local.path);
+      }
 
       await _processQueue();
 
@@ -390,42 +400,40 @@ class DownloadManager {
 
   // ── Smart categorization ─────────────────────────────────────
 
-  Future<void> _categorizeCompletedFile(
+  /// Exports the downloaded file to the public Downloads directory.
+  /// Returns the new path on success, or null if it failed.
+  Future<String?> _exportCompletedFile(
       DownloadItem item, String sourcePath) async {
     final settings = _ref.read(settingsControllerProvider);
-    if (!settings.smartCategorization) return;
-    if (sourcePath.isEmpty) return;
+    if (sourcePath.isEmpty) return null;
 
     try {
       final status = await Permission.storage.request();
       if (!status.isGranted) {
-        final manageStatus =
-            await Permission.manageExternalStorage.request();
+        final manageStatus = await Permission.manageExternalStorage.request();
         if (!manageStatus.isGranted) {
           Log.error('Storage permission denied', tag: 'DL_MGR');
-          return;
+          return null;
         }
       }
 
-      final category = SettingsState.categoryForExtension(item.fileName);
-      final targetDir =
-          io.Directory('${settings.downloadBasePath}/$category');
-
-      if (!await targetDir.exists()) {
-        await targetDir.create(recursive: true);
+      final targetPath = settings.resolveDownloadPath(item.fileName);
+      final targetFile = IOFile(targetPath);
+      
+      if (!await targetFile.parent.exists()) {
+        await targetFile.parent.create(recursive: true);
       }
 
-      final targetPath = '${targetDir.path}/${item.fileName}';
       final sourceFile = IOFile(sourcePath);
-
       if (await sourceFile.exists()) {
         await sourceFile.copy(targetPath);
-        Log.info('Categorized: ${item.fileName} → $category/',
-            tag: 'DL_MGR');
+        Log.info('Exported: ${item.fileName} → $targetPath', tag: 'DL_MGR');
+        return targetPath;
       }
     } catch (e) {
-      Log.error('Failed to categorize file', error: e, tag: 'DL_MGR');
+      Log.error('Failed to export file to external storage', error: e, tag: 'DL_MGR');
     }
+    return null;
   }
 
   // ── Auto-extraction ──────────────────────────────────────────

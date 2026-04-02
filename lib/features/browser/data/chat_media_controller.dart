@@ -113,7 +113,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       state = state.copyWith(
         media: messages,
         isLoading: false,
-        hasMore: messages.length >= 1,
+        hasMore: messages.isNotEmpty,
       );
     } catch (e) {
       Log.error('Failed to load media', error: e, tag: 'CHAT_MEDIA');
