@@ -1,4 +1,4 @@
-package com.example.telegram_downloader
+package com.struthio.tesseract
 
 import io.flutter.embedding.android.FlutterActivity
 

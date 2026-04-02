@@ -41,7 +41,7 @@ case "$MODE" in
     flutter build apk --release --no-tree-shake-icons $DEFINES
     adb install -r build/app/outputs/flutter-apk/app-release.apk
     echo "✅  Installed. Starting app..."
-    adb shell am start -n com.example.telegram_downloader/.MainActivity
+    adb shell am start -n com.struthio.tesseract/.MainActivity
     echo "💡  Run 'adb logcat | grep TdLibClient' to see TDLib logs."
     ;;
   *)
