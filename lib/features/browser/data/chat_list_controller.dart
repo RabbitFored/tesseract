@@ -58,7 +58,7 @@ class ChatListController extends StateNotifier<ChatListState> {
       // We must call LoadChats first to fetch them from the server.
       // ignore: prefer_const_constructors
       final loadResult = await send(LoadChats(
-        chatList: null,
+        chatList: const ChatListMain(),
         limit: _pageSize,
       ));
 
@@ -69,7 +69,7 @@ class ChatListController extends StateNotifier<ChatListState> {
 
       // ignore: prefer_const_constructors
       final result = await send(GetChats(
-        chatList: null, // main chat list
+        chatList: const ChatListMain(), // main chat list
         limit: _pageSize,
       ));
 
@@ -107,7 +107,7 @@ class ChatListController extends StateNotifier<ChatListState> {
 
       // ignore: prefer_const_constructors
       final loadResult = await send(LoadChats(
-        chatList: null,
+        chatList: const ChatListMain(),
         limit: _pageSize,
       ));
 
@@ -119,7 +119,7 @@ class ChatListController extends StateNotifier<ChatListState> {
       // Use the last chat's order as offset for pagination.
       // ignore: prefer_const_constructors
       final result = await send(GetChats(
-        chatList: null,
+        chatList: const ChatListMain(),
         limit: state.chats.length + _pageSize, // GetChats returns from the beginning, so we need to request all + page size
       ));
 
