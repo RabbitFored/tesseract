@@ -23,4 +23,4 @@ ios/.symlinks/
 *.log
 .DS_Store
 .env
-.agent/
+.agents/

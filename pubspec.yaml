@@ -60,11 +60,19 @@ dev_dependencies:
   flutter_launcher_icons: ^0.13.1
 
 flutter:
+  uses-material-design: true
+
   assets:
-    - assets/images/TESSERACTv0.png
+    - assets/images/
 
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: "assets/images/TESSERACTv0.png"
-  min_sdk_android: 21 # android min sdk min:16, default:21
+  image_path: "assets/images/TESSERACTv0_icon.png"
+  min_sdk_android: 21
+  # Adaptive icon for Android 8+ — black background, logo as foreground.
+  # This prevents any white padding on modern launchers.
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/images/TESSERACTv0_icon.png"
+  # Also set iOS background to black so it matches.
+  remove_alpha_ios: true

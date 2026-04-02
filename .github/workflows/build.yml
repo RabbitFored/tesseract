@@ -11,9 +11,9 @@ env:
 
 jobs:
   build:
-    name: Build Release APK
+    name: Build Release APK (arm64)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       # ── Checkout ──────────────────────────────────────────────
@@ -34,9 +34,6 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
-
-      - name: Verify Flutter installation
-        run: flutter doctor -v
 
       # ── Dependencies ──────────────────────────────────────────
       - name: Get dependencies
@@ -71,29 +68,55 @@ jobs:
       - name: Run unit & widget tests
         run: flutter test
 
-      # ── Build APK ─────────────────────────────────────────────
-      - name: Build release APK
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # ← auto-provided, no setup needed
+      # ── Build APK (arm64-v8a only, split, obfuscated) ─────────
+      # Key size optimizations vs the old build command:
+      #   --target-platform android-arm64   → skips x86/x86_64/arm32 AOT code
+      #   --split-per-abi                   → one APK per ABI (arm64 only here)
+      #   --obfuscate + --split-debug-info  → strips debug symbols from binary
+      #   Remove --no-tree-shake-icons      → enables dead-code elimination on icons
+      #   --shrink                          → R8/ProGuard shrinks Kotlin/Java bytecode
+      - name: Build release APK (arm64 only)
         run: >
-          flutter build apk --release --no-tree-shake-icons
+          flutter build apk
+          --release
+          --target-platform android-arm64
+          --split-per-abi
+          --obfuscate
+          --split-debug-info=build/debug-info
           --dart-define=TELEGRAM_API_ID=${{ secrets.TELEGRAM_API_ID }}
           --dart-define=TELEGRAM_API_HASH=${{ secrets.TELEGRAM_API_HASH }}
+
+      # ── Show APK size for tracking ─────────────────────────────
+      - name: Report APK size
+        run: |
+          APK=$(find build/app/outputs/flutter-apk -name "*arm64*.apk" | head -1)
+          SIZE=$(du -sh "$APK" | cut -f1)
+          echo "### APK Size: $SIZE" >> $GITHUB_STEP_SUMMARY
+          echo "Path: $APK" >> $GITHUB_STEP_SUMMARY
+          ls -lh build/app/outputs/flutter-apk/
 
       # ── Upload Artifact ───────────────────────────────────────
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-downloader-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: tesseract-arm64-apk
+          path: build/app/outputs/flutter-apk/*arm64*.apk
           retention-days: 30
           if-no-files-found: error
 
-      # ── (Optional) Create GitHub Release ──────────────────────
+      # ── Upload debug symbols (for crash symbolication) ────────
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: tesseract-debug-symbols
+          path: build/debug-info/
+          retention-days: 30
+          if-no-files-found: warn
+
+      # ── (Optional) Create GitHub Release on version tags ──────
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: build/app/outputs/flutter-apk/*arm64*.apk
           generate_release_notes: true
