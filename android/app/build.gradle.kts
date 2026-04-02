@@ -44,11 +44,8 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
-        // Only package arm64-v8a — covers all modern Android phones.
-        // Add "armeabi-v7a" here if you need older device support.
-        ndk {
-            abiFilters += listOf("arm64-v8a")
-        }
+        // ABI filtering is handled by --target-platform android-arm64 --split-per-abi
+        // in the flutter build command. Do NOT add ndk.abiFilters here — it conflicts.
     }
 
     buildTypes {
