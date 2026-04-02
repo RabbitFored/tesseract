@@ -84,6 +84,12 @@ final chatMediaControllerProvider = StateNotifierProvider.family<
 ///   - **Search Mode**: Query-based results via `SearchChatMessages`
 ///
 /// Clearing the search reverts instantly to the cached history state.
+///
+/// ## TDLib Cache Warmup
+/// On the first `GetChatHistory` call for a chat, TDLib may return an empty
+/// list because the local cache isn't populated yet — the server fetch is
+/// triggered in the background. The controller handles this by retrying once
+/// after a short delay, and by always allowing `loadMore()` after initial load.
 class ChatMediaController extends StateNotifier<ChatMediaState> {
   ChatMediaController(this._ref, this._chatId)
       : super(ChatMediaState(chatId: _chatId));
@@ -103,6 +109,10 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
   // ══════════════════════════════════════════════════════════════
 
   /// Load the initial batch of media messages.
+  ///
+  /// Always sets [hasMore] = true after the first load so that
+  /// [loadMore] can be triggered even for chats where TDLib's cache
+  /// warmup caused the first page to be sparse.
   Future<void> loadMedia() async {
     if (state.isLoading) return;
     state = state.copyWith(isLoading: true, error: '');
@@ -113,8 +123,17 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       state = state.copyWith(
         media: messages,
         isLoading: false,
-        hasMore: messages.isNotEmpty,
+        // Always allow loadMore after first load — TDLib cache may have been
+        // empty on the first call, so we cannot trust an empty result as "done".
+        hasMore: true,
       );
+
+      // If fewer than 3 media items were found, automatically try to load
+      // the next page. This covers the common case where TDLib's cache
+      // warmup returns nothing on the first call but has data immediately after.
+      if (messages.length < 3 && mounted) {
+        await loadMore();
+      }
     } catch (e) {
       Log.error('Failed to load media', error: e, tag: 'CHAT_MEDIA');
       state = state.copyWith(isLoading: false, error: e.toString());
@@ -135,7 +154,13 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       final messages = await _fetchAndFilter(fromMessageId: _oldestMessageId);
 
       if (messages.isEmpty) {
-        state = state.copyWith(isLoadingMore: false, hasMore: false);
+        // Only mark as done if we also know the batch was short
+        // (i.e., TDLib returned fewer messages than requested).
+        // The _fetchAndFilter method sets _exhausted to communicate this.
+        state = state.copyWith(
+          isLoadingMore: false,
+          hasMore: _hasMoreAfterFetch,
+        );
         return;
       }
 
@@ -146,7 +171,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       state = state.copyWith(
         media: [...state.media, ...newMedia],
         isLoadingMore: false,
-        hasMore: newMedia.isNotEmpty,
+        hasMore: _hasMoreAfterFetch,
       );
     } catch (e) {
       state = state.copyWith(isLoadingMore: false);
@@ -243,7 +268,14 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
   //  PRIVATE — Fetch helpers
   // ══════════════════════════════════════════════════════════════
 
+  /// Tracks whether the last fetch hit the true end of history.
+  /// True = there may be more messages; False = TDLib returned a short batch.
+  bool _hasMoreAfterFetch = true;
+
   /// Fetch history batches and filter for media.
+  ///
+  /// Retries once with a short delay if TDLib returns an empty list on the
+  /// first call, which happens when the local cache hasn't been warmed up yet.
   Future<List<MediaMessage>> _fetchAndFilter({
     required int fromMessageId,
     int batchFetchCount = 5,
@@ -252,6 +284,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
     final collected = <MediaMessage>[];
 
     int currentFromId = fromMessageId;
+    bool definitivelyExhausted = false;
 
     for (int batch = 0; batch < batchFetchCount; batch++) {
       final result = await send(GetChatHistory(
@@ -265,7 +298,51 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       if (result is! Messages) break;
 
       final msgs = result.messages;
-      if (msgs.isEmpty) break;
+
+      // ── TDLib Cache Warmup Retry ─────────────────────────────
+      // On the very first call (fromMessageId == 0), TDLib may return an
+      // empty list because the server fetch is still in progress in the
+      // background. Wait briefly and retry once.
+      if (msgs.isEmpty && batch == 0 && currentFromId == 0) {
+        Log.info(
+          'GetChatHistory returned empty on first call — retrying after cache warmup',
+          tag: 'CHAT_MEDIA',
+        );
+        await Future.delayed(const Duration(milliseconds: 900));
+
+        final retryResult = await send(GetChatHistory(
+          chatId: _chatId,
+          fromMessageId: 0,
+          offset: 0,
+          limit: _pageSize,
+          onlyLocal: false,
+        ));
+
+        if (retryResult is! Messages || retryResult.messages.isEmpty) {
+          // Genuinely empty chat or no media at all — allow another attempt later.
+          _hasMoreAfterFetch = true;
+          return collected;
+        }
+
+        // Use retry result.
+        for (final msg in retryResult.messages) {
+          final media = MediaMessage.fromTdlibMessage(msg);
+          if (media != null) collected.add(media);
+        }
+        _oldestMessageId = retryResult.messages.last.id;
+        currentFromId = _oldestMessageId;
+
+        if (retryResult.messages.length < _pageSize) {
+          definitivelyExhausted = true;
+          break;
+        }
+        continue;
+      }
+
+      if (msgs.isEmpty) {
+        definitivelyExhausted = true;
+        break;
+      }
 
       for (final msg in msgs) {
         final media = MediaMessage.fromTdlibMessage(msg);
@@ -275,10 +352,17 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       _oldestMessageId = msgs.last.id;
       currentFromId = _oldestMessageId;
 
-      if (msgs.length < _pageSize) break;
+      // A short batch means TDLib has no more history.
+      if (msgs.length < _pageSize) {
+        definitivelyExhausted = true;
+        break;
+      }
+
+      // Stop fetching more batches once we have enough to display.
       if (collected.length >= _pageSize) break;
     }
 
+    _hasMoreAfterFetch = !definitivelyExhausted;
     return collected;
   }
 

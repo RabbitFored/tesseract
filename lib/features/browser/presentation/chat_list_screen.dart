@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/chat_list_controller.dart';
+//import '../domain/chat_item.dart';
 import 'chat_media_screen.dart';
 import 'widgets/chat_tile.dart';
 
 /// Screen showing the user's Telegram chats/channels.
 /// Tapping a chat navigates to [ChatMediaScreen].
+///
+/// Uses skeleton tiles while loading so the screen feels responsive
+/// even during the initial TDLib server fetch.
 class ChatListScreen extends ConsumerStatefulWidget {
   const ChatListScreen({super.key});
 
@@ -20,7 +24,6 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   @override
   void initState() {
     super.initState();
-    // Load chats on first open.
     Future.microtask(() {
       ref.read(chatListControllerProvider.notifier).loadChats();
     });
@@ -58,8 +61,9 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   }
 
   Widget _buildBody(ChatListState state, ThemeData theme) {
+    // Show skeletons when we are loading and have nothing to show yet.
     if (state.isLoading && state.chats.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return _SkeletonChatList(theme: theme);
     }
 
     if (state.error.isNotEmpty && state.chats.isEmpty) {
@@ -128,18 +132,17 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
       child: ListView.separated(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: state.chats.length + (state.isLoading ? 1 : 0),
+        // Extra slots: skeleton tiles when paginating + spinner at bottom.
+        itemCount: state.chats.length + (state.isLoading ? 3 : 0),
         separatorBuilder: (_, __) => Divider(
           height: 0.5,
           indent: 72,
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
         ),
         itemBuilder: (context, index) {
+          // Render skeleton tiles at the end during pagination.
           if (index >= state.chats.length) {
-            return const Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: CircularProgressIndicator()),
-            );
+            return _SkeletonChatTile(theme: theme);
           }
 
           final chat = state.chats[index];
@@ -157,6 +160,112 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+// ── Skeleton loading widgets ─────────────────────────────────────
+
+/// Full-page skeleton shown before any chats have loaded.
+class _SkeletonChatList extends StatelessWidget {
+  const _SkeletonChatList({required this.theme});
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: 12,
+      separatorBuilder: (_, __) => Divider(
+        height: 0.5,
+        indent: 72,
+        color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+      ),
+      itemBuilder: (_, __) => _SkeletonChatTile(theme: theme),
+    );
+  }
+}
+
+/// A single shimmer-like placeholder tile mimicking [ChatTile].
+class _SkeletonChatTile extends StatefulWidget {
+  const _SkeletonChatTile({required this.theme});
+  final ThemeData theme;
+
+  @override
+  State<_SkeletonChatTile> createState() => _SkeletonChatTileState();
+}
+
+class _SkeletonChatTileState extends State<_SkeletonChatTile>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final base = widget.theme.colorScheme.onSurface.withValues(alpha: 0.06);
+    final highlight = widget.theme.colorScheme.onSurface.withValues(alpha: 0.13);
+
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, __) {
+        final color = Color.lerp(base, highlight, _anim.value)!;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              // Avatar placeholder
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Title line
+                    Container(
+                      height: 13,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    const SizedBox(height: 7),
+                    // Subtitle line (shorter)
+                    Container(
+                      height: 11,
+                      width: 120,
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

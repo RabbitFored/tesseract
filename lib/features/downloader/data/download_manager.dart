@@ -260,16 +260,31 @@ class DownloadManager {
 
   /// Enqueue a download from a Telegram message link.
   /// Returns null on success, or an error message if it fails.
+  ///
+  /// Enforces a 15-second timeout on [GetMessageLinkInfo] so a stale or
+  /// unreachable link cannot block the TDLib receive loop for 40s and
+  /// corrupt subsequent requests' response matching.
   Future<String?> enqueueFromUrl(String url) async {
     final send = _ref.read(tdlibSendProvider);
-    
-    // ignore: prefer_const_constructors
-    final linkInfoResult = await send(GetMessageLinkInfo(url: url));
-    
+
+    TdObject? linkInfoResult;
+    try {
+      // ignore: prefer_const_constructors
+      linkInfoResult = await send(GetMessageLinkInfo(url: url)).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => const TdError(
+          code: 408,
+          message: 'Link lookup timed out. Check your connection and try again.',
+        ),
+      );
+    } catch (e) {
+      return 'Failed to look up link: $e';
+    }
+
     if (linkInfoResult is TdError) {
       return linkInfoResult.message;
     }
-    
+
     if (linkInfoResult is! MessageLinkInfo) {
       return 'Invalid link';
     }
