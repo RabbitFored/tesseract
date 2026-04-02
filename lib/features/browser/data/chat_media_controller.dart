@@ -113,7 +113,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       state = state.copyWith(
         media: messages,
         isLoading: false,
-        hasMore: messages.length >= 5,
+        hasMore: messages.length >= 1,
       );
     } catch (e) {
       Log.error('Failed to load media', error: e, tag: 'CHAT_MEDIA');
@@ -246,7 +246,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
   /// Fetch history batches and filter for media.
   Future<List<MediaMessage>> _fetchAndFilter({
     required int fromMessageId,
-    int batchFetchCount = 3,
+    int batchFetchCount = 5,
   }) async {
     final send = _ref.read(tdlibSendProvider);
     final collected = <MediaMessage>[];

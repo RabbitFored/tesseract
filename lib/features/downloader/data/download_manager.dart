@@ -143,17 +143,27 @@ class DownloadManager {
             ? DownloadStatus.downloading
             : item.status);
 
-    await _db.updateProgress(
-      file.id,
-      downloadedSize: downloadedSize,
-      status: newStatus,
-    );
+    if (isComplete && local.path.isNotEmpty) {
+      // Update both progress AND the actual local path from TDLib.
+      await _db.updateProgressAndPath(
+        file.id,
+        downloadedSize: downloadedSize,
+        status: newStatus,
+        localPath: local.path,
+      );
+    } else {
+      await _db.updateProgress(
+        file.id,
+        downloadedSize: downloadedSize,
+        status: newStatus,
+      );
+    }
 
     _notifyChange();
     _pushProgressToService();
 
     if (isComplete) {
-      Log.tdlib('Download complete: fileId=${file.id}');
+      Log.tdlib('Download complete: fileId=${file.id} path=${local.path}');
       _speed.removeFile(file.id);
 
       await _categorizeCompletedFile(item, local.path);

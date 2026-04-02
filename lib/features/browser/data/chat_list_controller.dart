@@ -74,11 +74,13 @@ class ChatListController extends StateNotifier<ChatListState> {
       ));
 
       if (result is Chats) {
-        final chatItems = <ChatItem>[];
-        for (final chatId in result.chatIds) {
-          final chatItem = await _fetchChatDetail(send, chatId);
-          if (chatItem != null) chatItems.add(chatItem);
-        }
+        // Fetch all chat details in parallel for speed.
+        final futures = result.chatIds
+            .map((chatId) => _fetchChatDetail(send, chatId))
+            .toList();
+        final chatItems = (await Future.wait(futures))
+            .whereType<ChatItem>()
+            .toList();
 
         state = state.copyWith(
           chats: chatItems,
@@ -124,13 +126,16 @@ class ChatListController extends StateNotifier<ChatListState> {
       ));
 
       if (result is Chats) {
-        final newChats = <ChatItem>[];
-        for (final chatId in result.chatIds) {
-          // Skip chats we already have
-          if (state.chats.any((c) => c.id == chatId)) continue;
-          final chatItem = await _fetchChatDetail(send, chatId);
-          if (chatItem != null) newChats.add(chatItem);
-        }
+        // Fetch all new chat details in parallel.
+        final newIds = result.chatIds
+            .where((id) => !state.chats.any((c) => c.id == id))
+            .toList();
+        final futures = newIds
+            .map((chatId) => _fetchChatDetail(send, chatId))
+            .toList();
+        final newChats = (await Future.wait(futures))
+            .whereType<ChatItem>()
+            .toList();
 
         state = state.copyWith(
           chats: [...state.chats, ...newChats],

@@ -104,6 +104,27 @@ class DownloadDb {
     );
   }
 
+  /// Update progress, status, AND local_path (used when download completes
+  /// so the stored path reflects TDLib's actual saved file location).
+  Future<int> updateProgressAndPath(
+    int fileId, {
+    required int downloadedSize,
+    required DownloadStatus status,
+    required String localPath,
+  }) async {
+    final db = await database;
+    return db.update(
+      _table,
+      {
+        'downloaded_size': downloadedSize,
+        'status': status.name,
+        'local_path': localPath,
+      },
+      where: 'file_id = ?',
+      whereArgs: [fileId],
+    );
+  }
+
   /// Update only the status of a download item.
   Future<int> updateStatus(int fileId, DownloadStatus status) async {
     final db = await database;
