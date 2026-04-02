@@ -404,7 +404,7 @@ class DownloadManager {
   /// Returns the new path on success, or null if it failed.
   Future<String?> _exportCompletedFile(
       DownloadItem item, String sourcePath) async {
-    final settings = _ref.read(settingsControllerProvider);
+    final settings = _ref.read(settingsControllerProvider.notifier);
     if (sourcePath.isEmpty) return null;
 
     try {
