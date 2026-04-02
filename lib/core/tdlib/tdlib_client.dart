@@ -158,7 +158,7 @@ class TdLibClient {
         .first
         .timeout(const Duration(seconds: 40), onTimeout: () {
       debugPrint('[TdLibClient] send() TIMEOUT extra=$extra function=${function.runtimeType}');
-      return Error(code: 408, message: 'Request timed out');
+      return const TdError(code: 408, message: 'Request timed out');
     });
     debugPrint('[TdLibClient] send() DONE extra=$extra result=${result.runtimeType}');
     return result;
