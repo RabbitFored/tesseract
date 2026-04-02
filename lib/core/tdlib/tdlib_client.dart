@@ -149,13 +149,19 @@ class TdLibClient {
     if (_clientId == 0) return null;
 
     final extra = DateTime.now().microsecondsSinceEpoch.toString();
+    debugPrint('[TdLibClient] send() extra=$extra function=${function.runtimeType}');
     tdSend(_clientId, function, extra);
 
     // Wait for the response with the matching extra field.
-    return updates
+    final result = await updates
         .where((e) => e.extra?.toString() == extra)
         .first
-        .timeout(const Duration(seconds: 20), onTimeout: () => const Ok());
+        .timeout(const Duration(seconds: 5), onTimeout: () {
+      debugPrint('[TdLibClient] send() TIMEOUT extra=$extra function=${function.runtimeType}');
+      return const Ok();
+    });
+    debugPrint('[TdLibClient] send() DONE extra=$extra result=${result.runtimeType}');
+    return result;
   }
 
   /// Dispose the timer and stream controller.
