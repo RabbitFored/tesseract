@@ -8,7 +8,9 @@
 /// Register at https://my.telegram.org/apps to obtain your credentials.
 /// In CI, these are supplied from GitHub secrets (see .github/workflows/build.yml).
 abstract final class AppConstants {
-  static const String appVersion = '1.0.0';
+  static const String appName = 'Tesseract';
+  static const String developer = 'Struthio';
+  static const String appVersion = '1.0.1+2';
 
   // ── Telegram API credentials (injected via --dart-define) ────
   static const int telegramApiId =

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/constants/app_constants.dart';
 import 'core/router/app_router.dart';
 import 'features/settings/data/settings_controller.dart';
 
@@ -16,7 +17,7 @@ class TelegramDownloaderApp extends ConsumerWidget {
     );
 
     return MaterialApp(
-      title: 'Telegram Downloader',
+      title: AppConstants.appName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(

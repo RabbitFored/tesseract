@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../data/auth_controller.dart';
 import '../domain/auth_state.dart';
 import 'widgets/code_input_form.dart';
@@ -121,7 +122,7 @@ class _BrandingHeader extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         Text(
-          'Telegram Downloader',
+          AppConstants.appName,
           style: theme.textTheme.headlineSmall?.copyWith(
             fontWeight: FontWeight.w700,
             color: theme.colorScheme.onSurface,

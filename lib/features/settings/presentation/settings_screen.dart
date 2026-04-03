@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../data/settings_controller.dart';
 
 /// Settings screen with concurrent download slider, theme toggle,
@@ -337,13 +338,16 @@ class SettingsScreen extends ConsumerWidget {
 
           ListTile(
             leading: const Icon(Icons.info_outline_rounded),
-            title: const Text('Telegram Downloader'),
+            title: const Text(AppConstants.appName),
             subtitle: Text(
-              'v1.0.0 • Powered by TDLib',
+              'v${AppConstants.appVersion} • Developed by ${AppConstants.developer}\n'
+              'Powered by TDLib',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
+                height: 1.5,
               ),
             ),
+            isThreeLine: true,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           ),
