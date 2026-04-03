@@ -1,18 +1,22 @@
 // Minimal smoke test for TESSERACT.
 //
-// The original boilerplate referenced `MyApp()` which does not exist in this
-// project, causing `flutter test` to fail at compile time. This test wires up
-// the actual app widget with a fake TdLibClient so it can render without a
-// real TDLib native library present in the test environment.
+// This test wires up the actual app widget with a fake TdLibClient so it can
+// render without a real TDLib native library present in the test environment.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:tesseract/app.dart';
+import 'package:tesseract/core/constants/app_constants.dart';
 import 'package:tesseract/core/tdlib/tdlib_client.dart';
 
 void main() {
+  setUpAll(() async {
+    // Initialize AppConstants with test-safe fallbacks (no real platform).
+    await AppConstants.initialize();
+  });
+
   testWidgets('App renders without crashing', (WidgetTester tester) async {
     // Build the app with a fake TdLibClient injected so no native library
     // is required during tests.
