@@ -88,10 +88,25 @@ class ChatListController extends StateNotifier<ChatListState> {
 
   // ── Initial Load ────────────────────────────────────────────────
 
-  /// Load the initial batch of chats progressively.
-  Future<void> loadChats() async {
+  /// Load chats. If we already have cached data, show it immediately
+  /// and refresh in the background (Telegram-like behavior).
+  /// If called for the first time (no cached data), does a full load.
+  Future<void> loadChats({bool forceRefresh = false}) async {
     if (state.isLoading) return;
-    state = const ChatListState(isLoading: true);
+
+    // If we already have cached chats and this isn't a forced refresh,
+    // show them instantly and refresh silently in the background.
+    if (state.chats.isNotEmpty && !forceRefresh) {
+      _refreshInBackground();
+      return;
+    }
+
+    state = state.copyWith(
+      isLoading: true,
+      error: '',
+      // Preserve existing chats during refresh so the UI doesn't flash.
+      chats: forceRefresh ? state.chats : const [],
+    );
     _fetchedSoFar = 0;
 
     try {
@@ -151,6 +166,30 @@ class ChatListController extends StateNotifier<ChatListState> {
     } catch (e) {
       Log.error('Failed to load chats', error: e, tag: 'CHAT_LIST');
       state = state.copyWith(isLoading: false, error: e.toString());
+    }
+  }
+
+  /// Silently refresh chats in the background without clearing the UI.
+  Future<void> _refreshInBackground() async {
+    try {
+      final send = _ref.read(tdlibSendProvider);
+
+      // Ask TDLib to load fresh data from server.
+      await send(const LoadChats(chatList: null, limit: _initialPageSize));
+
+      // Get the latest chat list from cache.
+      final res = await send(const GetChats(
+        chatList: null,
+        limit: _initialPageSize,
+      ));
+
+      if (res is Chats && res.chatIds.isNotEmpty) {
+        _fetchedSoFar = res.chatIds.length;
+        await _streamChatDetails(send, res.chatIds, replace: true);
+        state = state.copyWith(hasMore: true);
+      }
+    } catch (e) {
+      Log.error('Background refresh failed', error: e, tag: 'CHAT_LIST');
     }
   }
 

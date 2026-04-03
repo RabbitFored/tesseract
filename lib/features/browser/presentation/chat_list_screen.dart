@@ -134,7 +134,7 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
               const SizedBox(height: 24),
               FilledButton.icon(
                 onPressed: () =>
-                    ref.read(chatListControllerProvider.notifier).loadChats(),
+                    ref.read(chatListControllerProvider.notifier).loadChats(forceRefresh: true),
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Retry'),
               ),
@@ -172,7 +172,7 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
 
     return RefreshIndicator(
       onRefresh: () =>
-          ref.read(chatListControllerProvider.notifier).loadChats(),
+          ref.read(chatListControllerProvider.notifier).loadChats(forceRefresh: true),
       child: ListView.separated(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
