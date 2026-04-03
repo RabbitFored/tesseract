@@ -440,8 +440,11 @@ class DownloadManager {
   /// Returns the new path on success, or null if it failed.
   Future<String?> _exportCompletedFile(
       DownloadItem item, String sourcePath) async {
-    final settings = _ref.read(settingsControllerProvider.notifier);
-    if (sourcePath.isEmpty) return null;
+    final settingsNotifier = _ref.read(settingsControllerProvider.notifier);
+    if (sourcePath.isEmpty) {
+      Log.error('Export skipped: source path is empty', tag: 'DL_MGR');
+      return null;
+    }
 
     try {
       // On Android 11+, we need MANAGE_EXTERNAL_STORAGE.
@@ -461,12 +464,16 @@ class DownloadManager {
         return null;
       }
 
-      final targetPath = settings.resolveDownloadPath(item.fileName);
+      // Read the CURRENT download path from settings state (not stale).
+      final targetPath = settingsNotifier.resolveDownloadPath(item.fileName);
+      Log.info('Export target: $targetPath', tag: 'DL_MGR');
+
       final targetFile = IOFile(targetPath);
 
       // Create parent directories.
       if (!await targetFile.parent.exists()) {
         await targetFile.parent.create(recursive: true);
+        Log.info('Created directory: ${targetFile.parent.path}', tag: 'DL_MGR');
       }
 
       final sourceFile = IOFile(sourcePath);
@@ -479,7 +486,7 @@ class DownloadManager {
       Log.info('Exported: ${item.fileName} → $targetPath', tag: 'DL_MGR');
       return targetPath;
     } catch (e) {
-      Log.error('Failed to export file: $e', error: e, tag: 'DL_MGR');
+      Log.error('Failed to export file "${item.fileName}": $e', error: e, tag: 'DL_MGR');
     }
     return null;
   }

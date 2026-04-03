@@ -36,6 +36,10 @@ class TdLibClient {
   Timer? _receiveTimer;
   final _updateController = StreamController<TdObject>.broadcast();
 
+  /// Monotonically increasing counter for unique request tagging.
+  /// Using microsecond timestamps caused collisions under concurrency.
+  int _extraCounter = 0;
+
   /// Stream of all TDLib updates (messages, auth state changes, etc.).
   Stream<TdObject> get updates => _updateController.stream;
 
@@ -136,7 +140,6 @@ class TdLibClient {
     // The 50ms timer interval provides the actual polling cadence.
     final result = tdReceive(0);
     if (result != null) {
-      debugPrint('[TdLibClient] tdReceive got: ${result.runtimeType}');
       if (!_updateController.isClosed) {
         _updateController.add(result);
       }
@@ -148,19 +151,21 @@ class TdLibClient {
   Future<TdObject?> send(TdFunction function) async {
     if (_clientId == 0) return null;
 
-    final extra = DateTime.now().microsecondsSinceEpoch.toString();
-    debugPrint('[TdLibClient] send() extra=$extra function=${function.runtimeType}');
+    // Use a monotonically increasing counter to guarantee uniqueness.
+    // The previous approach (microsecond timestamp) caused collisions
+    // when multiple send() calls fired in the same microsecond,
+    // leading to response mismatching and 40-second timeouts.
+    final extra = '${++_extraCounter}';
     tdSend(_clientId, function, extra);
 
     // Wait for the response with the matching extra field.
     final result = await updates
         .where((e) => e.extra?.toString() == extra)
         .first
-        .timeout(const Duration(seconds: 40), onTimeout: () {
+        .timeout(const Duration(seconds: 30), onTimeout: () {
       debugPrint('[TdLibClient] send() TIMEOUT extra=$extra function=${function.runtimeType}');
       return const TdError(code: 408, message: 'Request timed out');
     });
-    debugPrint('[TdLibClient] send() DONE extra=$extra result=${result.runtimeType}');
     return result;
   }
 

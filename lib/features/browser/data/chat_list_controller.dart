@@ -170,6 +170,8 @@ class ChatListController extends StateNotifier<ChatListState> {
   }
 
   /// Silently refresh chats in the background without clearing the UI.
+  /// Builds a new list atomically and swaps it into state — never wipes
+  /// the visible chat list, so the user always sees data.
   Future<void> _refreshInBackground() async {
     try {
       final send = _ref.read(tdlibSendProvider);
@@ -185,8 +187,20 @@ class ChatListController extends StateNotifier<ChatListState> {
 
       if (res is Chats && res.chatIds.isNotEmpty) {
         _fetchedSoFar = res.chatIds.length;
-        await _streamChatDetails(send, res.chatIds, replace: true);
-        state = state.copyWith(hasMore: true);
+
+        // Build the refreshed list in a local variable — do NOT touch
+        // state.chats until we have real data to replace it with.
+        final List<ChatItem> refreshedChats = [];
+        final futures = res.chatIds.map((id) async {
+          final item = await _fetchChatDetail(send, id);
+          if (item != null) refreshedChats.add(item);
+        });
+        await Future.wait(futures);
+
+        // Atomic swap — only if we actually got results.
+        if (refreshedChats.isNotEmpty && mounted) {
+          state = state.copyWith(chats: refreshedChats, hasMore: true);
+        }
       }
     } catch (e) {
       Log.error('Background refresh failed', error: e, tag: 'CHAT_LIST');
