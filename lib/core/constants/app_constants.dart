@@ -1,3 +1,5 @@
+import 'package:package_info_plus/package_info_plus.dart';
+
 /// Application-wide constants.
 ///
 /// Telegram API credentials are injected at build time via `--dart-define`:
@@ -7,8 +9,6 @@
 ///
 /// Register at https://my.telegram.org/apps to obtain your credentials.
 /// In CI, these are supplied from GitHub secrets (see .github/workflows/build.yml).
-import 'package:package_info_plus/package_info_plus.dart';
-
 abstract final class AppConstants {
   static late final PackageInfo _packageInfo;
 

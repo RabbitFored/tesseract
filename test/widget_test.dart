@@ -9,8 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:telegram_downloader/app.dart';
-import 'package:telegram_downloader/core/tdlib/tdlib_client.dart';
+import 'package:tesseract/app.dart';
+import 'package:tesseract/core/tdlib/tdlib_client.dart';
 
 void main() {
   testWidgets('App renders without crashing', (WidgetTester tester) async {
@@ -37,4 +37,3 @@ class _FakeTdLibClient extends TdLibClient {
     // No-op: skip native initialization in test environment.
   }
 }
-
