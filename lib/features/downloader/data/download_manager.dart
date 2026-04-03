@@ -447,21 +447,15 @@ class DownloadManager {
     }
 
     try {
-      // On Android 11+, we need MANAGE_EXTERNAL_STORAGE.
-      // On older versions, plain STORAGE suffices.
-      var granted = await Permission.manageExternalStorage.isGranted;
-      if (!granted) {
-        final manageStatus = await Permission.manageExternalStorage.request();
-        granted = manageStatus.isGranted;
+      // Best-effort permission request before copying.
+      // On some Android versions, these aren't strictly required for the Downloads
+      // directory, so we don't return null if they return denied. We just try the
+      // file copy operation and let the standard catch block handle genuine IO exceptions.
+      if (!await Permission.storage.isGranted) {
+        await Permission.storage.request();
       }
-      if (!granted) {
-        // Fallback to legacy storage permission for older Android.
-        final legacyStatus = await Permission.storage.request();
-        granted = legacyStatus.isGranted;
-      }
-      if (!granted) {
-        Log.error('Storage permission denied — file stays in TDLib cache', tag: 'DL_MGR');
-        return null;
+      if (!await Permission.manageExternalStorage.isGranted) {
+        await Permission.manageExternalStorage.request();
       }
 
       // Read the CURRENT download path from settings state (not stale).
