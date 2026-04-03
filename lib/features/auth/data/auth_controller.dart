@@ -33,6 +33,14 @@ class AuthController extends StateNotifier<AuthFlowState> {
   void _subscribe() {
     final client = _ref.read(tdlibClientProvider);
     _sub = client.updates.listen(_onUpdate);
+
+    // If TDLib already sent AuthorizationStateReady during bootstrap
+    // (before this controller existed), the broadcast stream event is
+    // gone. Check the cached auth state from TdLibClient instead.
+    final cached = client.lastAuthState;
+    if (cached != null) {
+      _handleAuthState(cached);
+    }
   }
 
   @override

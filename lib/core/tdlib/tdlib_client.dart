@@ -43,6 +43,10 @@ class TdLibClient {
   /// Stream of all TDLib updates (messages, auth state changes, etc.).
   Stream<TdObject> get updates => _updateController.stream;
 
+  /// Most recent authorization state seen by the receive loop.
+  /// Used by AuthController to avoid missing the initial AuthReady event.
+  AuthorizationState? lastAuthState;
+
   /// Whether the native client has been initialized.
   bool get isInitialized => _clientId != 0;
 
@@ -145,6 +149,12 @@ class TdLibClient {
     while (true) {
       final result = tdReceive(0);
       if (result == null) break;
+
+      // Cache the latest auth state so late subscribers don't miss it.
+      if (result is UpdateAuthorizationState) {
+        lastAuthState = result.authorizationState;
+      }
+
       if (!_updateController.isClosed) {
         _updateController.add(result);
       }
