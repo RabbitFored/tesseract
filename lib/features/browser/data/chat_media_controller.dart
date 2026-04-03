@@ -304,7 +304,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
   /// first call, which happens when the local cache hasn't been warmed up yet.
   Future<List<MediaMessage>> _fetchAndFilter({
     required int fromMessageId,
-    int batchFetchCount = 5,
+    int batchFetchCount = 20, // Increased to dig deeper through text-heavy threads
   }) async {
     final send = _ref.read(tdlibSendProvider);
     final collected = <MediaMessage>[];
@@ -313,28 +313,40 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
     bool definitivelyExhausted = false;
 
     for (int batch = 0; batch < batchFetchCount; batch++) {
-      TdObject? result;
+      List<Message> msgs = [];
+      
       if (_messageThreadId != 0) {
-        result = await send(GetMessageThreadHistory(
+        // Use SearchChatMessages with empty query to robustly fetch thread history.
+        // GetMessageThreadHistory often returns empty for uncached topics.
+        final result = await send(SearchChatMessages(
           chatId: _chatId,
-          messageId: _messageThreadId,
+          query: '',
+          senderId: null,
           fromMessageId: currentFromId,
           offset: 0,
           limit: _pageSize,
+          filter: null, // all messages
+          messageThreadId: _messageThreadId,
         ));
+        if (result is FoundChatMessages) {
+          msgs = result.messages;
+        } else {
+          break;
+        }
       } else {
-        result = await send(GetChatHistory(
+        final result = await send(GetChatHistory(
           chatId: _chatId,
           fromMessageId: currentFromId,
           offset: 0,
           limit: _pageSize,
           onlyLocal: false,
         ));
+        if (result is Messages) {
+          msgs = result.messages;
+        } else {
+          break;
+        }
       }
-
-      if (result is! Messages) break;
-
-      final msgs = result.messages;
 
       // ── TDLib Cache Warmup Retry ─────────────────────────────
       // On the very first call (fromMessageId == 0), TDLib may return an
@@ -347,47 +359,51 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
           '${isThread ? "GetMessageThreadHistory" : "GetChatHistory"} returned empty on first call — retrying ($maxRetries attempts)',
           tag: 'CHAT_MEDIA',
         );
-
         for (int retry = 0; retry < maxRetries; retry++) {
           await Future.delayed(Duration(milliseconds: (isThread ? 1500 : 900) + (retry * 500)));
 
-          TdObject? retryResult;
+          List<Message> retryMsgs = [];
           if (isThread) {
-            retryResult = await send(GetMessageThreadHistory(
+            final retryResult = await send(SearchChatMessages(
               chatId: _chatId,
-              messageId: _messageThreadId,
+              query: '',
+              senderId: null,
               fromMessageId: 0,
               offset: 0,
               limit: _pageSize,
+              filter: null,
+              messageThreadId: _messageThreadId,
             ));
+            if (retryResult is FoundChatMessages) retryMsgs = retryResult.messages;
           } else {
-            retryResult = await send(GetChatHistory(
+            final retryResult = await send(GetChatHistory(
               chatId: _chatId,
               fromMessageId: 0,
               offset: 0,
               limit: _pageSize,
               onlyLocal: false,
             ));
+            if (retryResult is Messages) retryMsgs = retryResult.messages;
           }
 
-          if (retryResult is Messages && retryResult.messages.isNotEmpty) {
+          if (retryMsgs.isNotEmpty) {
             // Use retry result.
-            for (final msg in retryResult.messages) {
+            for (final msg in retryMsgs) {
               final media = MediaMessage.fromTdlibMessage(msg);
               if (media != null) collected.add(media);
             }
-            _oldestMessageId = retryResult.messages.last.id;
+            _oldestMessageId = retryMsgs.last.id;
             currentFromId = _oldestMessageId;
 
-            if (retryResult.messages.length < _pageSize) {
+            if (retryMsgs.length < _pageSize) {
               definitivelyExhausted = true;
             }
             break; // Got data, stop retrying.
           }
         }
 
-        if (collected.isEmpty) {
-          // Genuinely empty — allow another attempt later from UI refresh.
+        if (currentFromId == 0) {
+          // Genuinely empty (no messages returned from API) — allow another attempt later from UI refresh.
           _hasMoreAfterFetch = true;
           return collected;
         }

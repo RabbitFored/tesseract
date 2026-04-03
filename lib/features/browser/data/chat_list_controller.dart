@@ -107,12 +107,13 @@ class ChatListController extends StateNotifier<ChatListState> {
       // Preserve existing chats during refresh so the UI doesn't flash.
       chats: forceRefresh ? state.chats : const [],
     );
+    final int oldFetched = _fetchedSoFar;
     _fetchedSoFar = 0;
 
     try {
       final send = _ref.read(tdlibSendProvider);
       
-      final int limit = forceRefresh && _fetchedSoFar > _pageSize ? _fetchedSoFar : _initialPageSize;
+      final int limit = forceRefresh && oldFetched > _pageSize ? oldFetched : _initialPageSize;
 
       final loadResult = await send(LoadChats(
         chatList: null,
