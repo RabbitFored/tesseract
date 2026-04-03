@@ -74,10 +74,7 @@ class _AddLinkDialogState extends ConsumerState<AddLinkDialog> {
 
     for (final url in urls) {
       try {
-        final error = await manager.enqueueFromUrl(url).timeout(
-          const Duration(seconds: 15),
-          onTimeout: () => 'Request timed out for $url',
-        );
+        final error = await manager.enqueueFromUrl(url);
         if (error != null) {
           failCount++;
           firstError ??= error;

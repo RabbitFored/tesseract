@@ -388,13 +388,12 @@ class ChatListController extends StateNotifier<ChatListState> {
     
     bool isForum = false;
 
-    // Only fetch supergroup info for supergroups, with a timeout
-    // to prevent blocking if TDLib is congested.
+    // Only fetch supergroup info for supergroups.
     if (detail.type is ChatTypeSupergroup) {
       try {
         final sgResult = await send(GetSupergroup(
           supergroupId: (detail.type as ChatTypeSupergroup).supergroupId,
-        )).timeout(const Duration(seconds: 5), onTimeout: () => null);
+        ));
         if (sgResult is Supergroup) {
           isForum = sgResult.isForum;
         }
