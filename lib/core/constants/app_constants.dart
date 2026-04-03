@@ -7,10 +7,23 @@
 ///
 /// Register at https://my.telegram.org/apps to obtain your credentials.
 /// In CI, these are supplied from GitHub secrets (see .github/workflows/build.yml).
+import 'package:package_info_plus/package_info_plus.dart';
+
 abstract final class AppConstants {
-  static const String appName = 'Tesseract';
-  static const String developer = 'Struthio';
-  static const String appVersion = '1.0.1+2';
+  static late final PackageInfo _packageInfo;
+
+  /// Call this during app bootstrap to initialize dynamic metadata.
+  static Future<void> initialize() async {
+    _packageInfo = await PackageInfo.fromPlatform();
+  }
+
+  static String get appName => _packageInfo.appName.isEmpty 
+      ? 'Tesseract' 
+      : _packageInfo.appName;
+
+  static String get developer => 'Struthio'; 
+  
+  static String get appVersion => '${_packageInfo.version}+${_packageInfo.buildNumber}';
 
   // ── Telegram API credentials (injected via --dart-define) ────
   static const int telegramApiId =

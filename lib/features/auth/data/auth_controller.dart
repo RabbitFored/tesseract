@@ -34,18 +34,12 @@ class AuthController extends StateNotifier<AuthFlowState> {
     final client = _ref.read(tdlibClientProvider);
     _sub = client.updates.listen(_onUpdate);
 
-    // Proactively query TDLib's current auth state. During bootstrap,
-    // the AuthorizationStateReady event may have already been consumed
-    // by main.dart's authStateFuture, so we'd never see it on the
-    // broadcast stream. This explicit query closes that race.
-    _queryCurrentAuthState();
-  }
-
-  Future<void> _queryCurrentAuthState() async {
-    final send = _ref.read(tdlibSendProvider);
-    final result = await send(const GetAuthorizationState());
-    if (result is AuthorizationState) {
-      _handleAuthState(result);
+    // If TDLib already sent AuthorizationStateReady during bootstrap
+    // (before this controller existed), the broadcast stream event is
+    // gone. Check the cached auth state from TdLibClient instead.
+    final cached = client.lastAuthState;
+    if (cached != null) {
+      _handleAuthState(cached);
     }
   }
 

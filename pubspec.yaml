@@ -1,7 +1,8 @@
-name: telegram_downloader
+name: tesseract
 description: A modern, unofficial Telegram client for Android focused on advanced file downloading.
 publish_to: 'none'
 version: 1.0.1+2
+developer: Struthio
 
 environment:
   sdk: ^3.4.0
@@ -11,6 +12,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  package_info_plus: ^8.0.0
 
   # Telegram MTProto via TDLib (Dart FFI wrapper)
   tdlib: ^1.6.0

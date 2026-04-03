@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'core/constants/app_constants.dart';
 import 'core/tdlib/tdlib_client.dart';
 import 'features/downloader/data/background_service.dart';
 import 'features/downloader/data/download_manager.dart';
@@ -16,6 +17,7 @@ const String kBackgroundPortName = 'tg_downloader_bg_port';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppConstants.initialize();
   _registerMainPort();
 
   // runApp immediately — all heavy init happens inside the widget tree.

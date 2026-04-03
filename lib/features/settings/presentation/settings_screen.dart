@@ -338,7 +338,7 @@ class SettingsScreen extends ConsumerWidget {
 
           ListTile(
             leading: const Icon(Icons.info_outline_rounded),
-            title: const Text(AppConstants.appName),
+            title: Text(AppConstants.appName),
             subtitle: Text(
               'v${AppConstants.appVersion} • Developed by ${AppConstants.developer}\n'
               'Powered by TDLib',
