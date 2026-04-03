@@ -18,10 +18,12 @@ class ChatMediaScreen extends ConsumerStatefulWidget {
     super.key,
     required this.chatId,
     required this.chatTitle,
+    this.messageThreadId = 0,
   });
 
   final int chatId;
   final String chatTitle;
+  final int messageThreadId;
 
   @override
   ConsumerState<ChatMediaScreen> createState() => _ChatMediaScreenState();
@@ -40,7 +42,7 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
     super.initState();
     Future.microtask(() {
       ref
-          .read(chatMediaControllerProvider(widget.chatId).notifier)
+          .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
           .loadMedia();
     });
     _scrollController.addListener(_onScroll);
@@ -59,7 +61,7 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
     if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 300) {
       ref
-          .read(chatMediaControllerProvider(widget.chatId).notifier)
+          .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
           .loadMore();
     }
   }
@@ -70,11 +72,11 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
     _debounce = Timer(const Duration(milliseconds: 500), () {
       if (query.trim().isEmpty) {
         ref
-            .read(chatMediaControllerProvider(widget.chatId).notifier)
+            .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
             .clearSearch();
       } else {
         ref
-            .read(chatMediaControllerProvider(widget.chatId).notifier)
+            .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
             .searchMedia(query);
       }
     });
@@ -87,7 +89,7 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
         _searchController.clear();
         _debounce?.cancel();
         ref
-            .read(chatMediaControllerProvider(widget.chatId).notifier)
+            .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
             .clearSearch();
       } else {
         // Auto-focus the search field.
@@ -100,13 +102,13 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
     _searchController.clear();
     _debounce?.cancel();
     ref
-        .read(chatMediaControllerProvider(widget.chatId).notifier)
+        .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
         .clearSearch();
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(chatMediaControllerProvider(widget.chatId));
+    final state = ref.watch(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)));
     final theme = Theme.of(context);
 
     // Use the state's active display list (search or history).
@@ -168,7 +170,7 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
                 _searchController.clear();
                 ref
                     .read(
-                        chatMediaControllerProvider(widget.chatId).notifier)
+                        chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
                     .clearSearch();
               },
             ),
@@ -224,7 +226,7 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
               FilledButton.icon(
                 onPressed: () => ref
                     .read(
-                        chatMediaControllerProvider(widget.chatId).notifier)
+                        chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
                     .loadMedia(),
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Retry'),

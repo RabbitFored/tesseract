@@ -142,11 +142,8 @@ class ChatListController extends StateNotifier<ChatListState> {
 
       await _streamChatDetails(send, result.chatIds, replace: true);
 
-      // If we got fewer than requested, maybe that's really all there is.
-      if (result.chatIds.length < _initialPageSize) {
-        hasMoreChats = false;
-      }
-
+      // Only rely on LoadChats 404 error to stop pagination because local GetChats cache
+      // might temporarily return fewer items than the server has actually sent.
       state = state.copyWith(
         isLoading: false,
         hasMore: hasMoreChats,
@@ -336,7 +333,30 @@ class ChatListController extends StateNotifier<ChatListState> {
         (detail.type is ChatTypeSupergroup &&
             !(detail.type as ChatTypeSupergroup).isChannel);
     
-    final isForum = detail.isForum;
+    bool isForum = false;
+    
+    if (detail.type is ChatTypeSupergroup) {
+        final sgResult = await send(GetSupergroup(
+            supergroupId: (detail.type as ChatTypeSupergroup).supergroupId));
+        if (sgResult is Supergroup) {
+            isForum = sgResult.isForum;
+        }
+    }
+
+    bool hasMedia = true;
+    final mediaResult = await send(SearchChatMessages(
+        chatId: detail.id,
+        query: '',
+        senderId: null,
+        filter: const SearchMessagesFilterDocument(),
+        fromMessageId: 0,
+        offset: 0,
+        limit: 1,
+        messageThreadId: 0,
+    ));
+    if (mediaResult is FoundChatMessages) {
+        hasMedia = mediaResult.totalCount > 0;
+    }
 
     String subtitle = '';
     if (isChannel) {
@@ -366,6 +386,7 @@ class ChatListController extends StateNotifier<ChatListState> {
       isChannel: isChannel,
       isGroup: isGroup,
       isForum: isForum,
+      hasMedia: hasMedia,
     );
   }
 }

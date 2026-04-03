@@ -119,15 +119,15 @@ class _AddLinkDialogState extends ConsumerState<AddLinkDialog> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'Paste Telegram message links to download their attached files. Separate multiple links with newlines or spaces.',
+            'Paste Telegram message links to download their attached files. Separate multiple links with newlines or spaces for Bulk Downloads.',
             style: theme.textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _controller,
             enabled: !_isLoading,
-            maxLines: 4,
-            minLines: 1,
+            maxLines: 8,
+            minLines: 3,
             decoration: InputDecoration(
               hintText: 'https://t.me/...\nhttps://t.me/...',
               errorText: _error,

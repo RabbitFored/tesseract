@@ -24,3 +24,4 @@ ios/.symlinks/
 .DS_Store
 .env
 .agents/
+test_tdlib.dart

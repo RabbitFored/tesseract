@@ -137,11 +137,16 @@ class DownloadManager {
     _speed.reportProgress(file.id, downloadedSize);
     _speed.computeSpeed(file.id, downloadedSize);
 
-    final newStatus = isComplete
-        ? DownloadStatus.completed
-        : (local.isDownloadingActive
-            ? DownloadStatus.downloading
-            : item.status);
+    // Fix Pause Bug: If the user currently set the item to paused, but TDLib is still processing the cancellation
+    // (local.isDownloadingActive is true), we must not overwrite our paused status back to downloading.
+    var newStatus = item.status;
+    if (isComplete) {
+      newStatus = DownloadStatus.completed;
+    } else if (item.status != DownloadStatus.paused && item.status != DownloadStatus.error) {
+      newStatus = local.isDownloadingActive
+          ? DownloadStatus.downloading
+          : item.status;
+    }
 
     if (isComplete && local.path.isNotEmpty) {
       // Update both progress AND the actual local path from TDLib.
@@ -331,7 +336,7 @@ class DownloadManager {
 
     final result = await send(DownloadFile(
       fileId: fileId,
-      priority: 1,
+      priority: 32, // 32 is the highest priority in TDLib
       offset: 0,
       limit: 0,
       synchronous: false,

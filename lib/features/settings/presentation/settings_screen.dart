@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../data/settings_controller.dart';
 
@@ -262,6 +263,13 @@ class SettingsScreen extends ConsumerWidget {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            trailing: const Icon(Icons.edit_rounded, size: 20),
+            onTap: () async {
+              final String? result = await FilePicker.platform.getDirectoryPath();
+              if (result != null) {
+                 controller.setDownloadPath(result);
+              }
+            },
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           ),

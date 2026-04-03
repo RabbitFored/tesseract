@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/chat_list_controller.dart';
 //import '../domain/chat_item.dart';
 import 'chat_media_screen.dart';
+import 'topic_list_screen.dart';
 import 'widgets/chat_tile.dart';
 
 /// Screen showing the user's Telegram chats/channels.
@@ -189,15 +190,29 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
           final chat = state.displayChats[index];
           return ChatTile(
             chat: chat,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ChatMediaScreen(
-                  chatId: chat.id,
-                  chatTitle: chat.title,
-                ),
-              ),
-            ),
+            onTap: () {
+              if (chat.isForum) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TopicListScreen(
+                      chatId: chat.id,
+                      chatTitle: chat.title,
+                    ),
+                  ),
+                );
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ChatMediaScreen(
+                      chatId: chat.id,
+                      chatTitle: chat.title,
+                    ),
+                  ),
+                );
+              }
+            },
           );
         },
       ),

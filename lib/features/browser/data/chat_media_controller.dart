@@ -6,6 +6,23 @@ import '../../../core/tdlib/tdlib_provider.dart';
 import '../../../core/utils/logger.dart';
 import '../domain/media_message.dart';
 
+class ChatMediaConfig {
+  const ChatMediaConfig(this.chatId, this.messageThreadId);
+  final int chatId;
+  final int messageThreadId;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ChatMediaConfig &&
+          runtimeType == other.runtimeType &&
+          chatId == other.chatId &&
+          messageThreadId == other.messageThreadId;
+
+  @override
+  int get hashCode => Object.hash(chatId, messageThreadId);
+}
+
 /// State for media messages in a specific chat.
 /// Supports both default history browsing and search mode.
 class ChatMediaState {
@@ -70,10 +87,10 @@ class ChatMediaState {
       );
 }
 
-/// Family provider: one controller per chatId.
+/// Family provider: one controller per config.
 final chatMediaControllerProvider = StateNotifierProvider.family<
-    ChatMediaController, ChatMediaState, int>(
-  (ref, chatId) => ChatMediaController(ref, chatId),
+    ChatMediaController, ChatMediaState, ChatMediaConfig>(
+  (ref, config) => ChatMediaController(ref, config),
 );
 
 /// Fetches message history for a selected chat, filters to only
@@ -91,11 +108,13 @@ final chatMediaControllerProvider = StateNotifierProvider.family<
 /// triggered in the background. The controller handles this by retrying once
 /// after a short delay, and by always allowing `loadMore()` after initial load.
 class ChatMediaController extends StateNotifier<ChatMediaState> {
-  ChatMediaController(this._ref, this._chatId)
-      : super(ChatMediaState(chatId: _chatId));
+  ChatMediaController(this._ref, this._config)
+      : super(ChatMediaState(chatId: _config.chatId));
 
   final Ref _ref;
-  final int _chatId;
+  final ChatMediaConfig _config;
+  int get _chatId => _config.chatId;
+  int get _messageThreadId => _config.messageThreadId;
   static const int _pageSize = 50;
 
   // ── History pagination state ─────────────────────────────────
@@ -287,13 +306,24 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
     bool definitivelyExhausted = false;
 
     for (int batch = 0; batch < batchFetchCount; batch++) {
-      final result = await send(GetChatHistory(
-        chatId: _chatId,
-        fromMessageId: currentFromId,
-        offset: 0,
-        limit: _pageSize,
-        onlyLocal: false,
-      ));
+      TdObject? result;
+      if (_messageThreadId != 0) {
+        result = await send(GetMessageThreadHistory(
+          chatId: _chatId,
+          messageId: _messageThreadId,
+          fromMessageId: currentFromId,
+          offset: 0,
+          limit: _pageSize,
+        ));
+      } else {
+        result = await send(GetChatHistory(
+          chatId: _chatId,
+          fromMessageId: currentFromId,
+          offset: 0,
+          limit: _pageSize,
+          onlyLocal: false,
+        ));
+      }
 
       if (result is! Messages) break;
 
@@ -310,13 +340,24 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
         );
         await Future.delayed(const Duration(milliseconds: 900));
 
-        final retryResult = await send(GetChatHistory(
-          chatId: _chatId,
-          fromMessageId: 0,
-          offset: 0,
-          limit: _pageSize,
-          onlyLocal: false,
-        ));
+        TdObject? retryResult;
+        if (_messageThreadId != 0) {
+            retryResult = await send(GetMessageThreadHistory(
+              chatId: _chatId,
+              messageId: _messageThreadId,
+              fromMessageId: 0,
+              offset: 0,
+              limit: _pageSize,
+            ));
+        } else {
+            retryResult = await send(GetChatHistory(
+              chatId: _chatId,
+              fromMessageId: 0,
+              offset: 0,
+              limit: _pageSize,
+              onlyLocal: false,
+            ));
+        }
 
         if (retryResult is! Messages || retryResult.messages.isEmpty) {
           // Genuinely empty chat or no media at all — allow another attempt later.
@@ -385,8 +426,8 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
         fromMessageId: currentFromId,
         offset: 0,
         limit: _pageSize,
-        filter: const SearchMessagesFilterDocument(), // Use document filter to search by file name
-        messageThreadId: 0,
+        filter: null, // Search across all message types, then filter locally
+        messageThreadId: _messageThreadId,
       ));
 
       if (result is! FoundChatMessages) break;
