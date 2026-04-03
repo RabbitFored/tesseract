@@ -6,13 +6,17 @@ import '../../../core/tdlib/tdlib_provider.dart';
 import '../../../core/utils/logger.dart';
 import '../domain/chat_item.dart';
 
-/// State for the chat list.
 class ChatListState {
   const ChatListState({
     this.chats = const [],
     this.isLoading = false,
     this.hasMore = true,
     this.error = '',
+    this.isSearchMode = false,
+    this.searchQuery = '',
+    this.searchResults = const [],
+    this.isSearching = false,
+    this.mediaOnly = false,
   });
 
   final List<ChatItem> chats;
@@ -20,17 +24,42 @@ class ChatListState {
   final bool hasMore;
   final String error;
 
+  final bool isSearchMode;
+  final String searchQuery;
+  final List<ChatItem> searchResults;
+  final bool isSearching;
+  
+  final bool mediaOnly;
+
+  List<ChatItem> get displayChats {
+    final list = isSearchMode ? searchResults : chats;
+    if (mediaOnly) {
+      return list.where((c) => c.hasMedia).toList();
+    }
+    return list;
+  }
+
   ChatListState copyWith({
     List<ChatItem>? chats,
     bool? isLoading,
     bool? hasMore,
     String? error,
+    bool? isSearchMode,
+    String? searchQuery,
+    List<ChatItem>? searchResults,
+    bool? isSearching,
+    bool? mediaOnly,
   }) =>
       ChatListState(
         chats: chats ?? this.chats,
         isLoading: isLoading ?? this.isLoading,
         hasMore: hasMore ?? this.hasMore,
         error: error ?? this.error,
+        isSearchMode: isSearchMode ?? this.isSearchMode,
+        searchQuery: searchQuery ?? this.searchQuery,
+        searchResults: searchResults ?? this.searchResults,
+        isSearching: isSearching ?? this.isSearching,
+        mediaOnly: mediaOnly ?? this.mediaOnly,
       );
 }
 
@@ -60,8 +89,6 @@ class ChatListController extends StateNotifier<ChatListState> {
   // ── Initial Load ────────────────────────────────────────────────
 
   /// Load the initial batch of chats progressively.
-  /// Each chat is inserted into state as soon as its detail is resolved,
-  /// so the list renders immediately instead of waiting for all futures.
   Future<void> loadChats() async {
     if (state.isLoading) return;
     state = const ChatListState(isLoading: true);
@@ -70,45 +97,59 @@ class ChatListController extends StateNotifier<ChatListState> {
     try {
       final send = _ref.read(tdlibSendProvider);
 
-      // 1. Ask TDLib to fetch chats from the server into local cache.
-      //    Code 404 = "already at the end", which is fine.
-      // ignore: prefer_const_constructors
-      final loadResult = await send(LoadChats(
+      final loadResult = await send(const LoadChats(
         chatList: null,
         limit: _initialPageSize,
       ));
 
-      if (loadResult is TdError && loadResult.code != 404) {
-        state = state.copyWith(isLoading: false, error: loadResult.message);
-        return;
+      bool hasMoreChats = true;
+      if (loadResult is TdError) {
+        if (loadResult.code == 404) {
+          hasMoreChats = false; // No more chats on the server
+        } else {
+          state = state.copyWith(isLoading: false, error: loadResult.message);
+          return;
+        }
       }
 
-      // 2. Get the ordered list of chat IDs from TDLib's local cache.
-      // ignore: prefer_const_constructors
-      final result = await send(GetChats(
-        chatList: null,
-        limit: _initialPageSize,
-      ));
-
-      if (result is! Chats) {
-        if (result is TdError) {
-          state = state.copyWith(isLoading: false, error: result.message);
-        } else {
-          state = state.copyWith(isLoading: false);
+      // Initial load: Wait for local cache to populate if it's currently empty.
+      Chats? result;
+      for (int i = 0; i < 6; i++) {
+        final res = await send(const GetChats(
+          chatList: null,
+          limit: _initialPageSize,
+        ));
+        if (res is Chats && res.chatIds.isNotEmpty) {
+          result = res;
+          break;
         }
+        await Future.delayed(const Duration(milliseconds: 800));
+      }
+
+      if (result == null) {
+        final res = await send(const GetChats(chatList: null, limit: _initialPageSize));
+        if (res is Chats) {
+          result = res;
+        }
+      }
+
+      if (result == null) {
+        state = state.copyWith(isLoading: false);
         return;
       }
 
       _fetchedSoFar = result.chatIds.length;
 
-      // 3. Stream each ChatItem into state as soon as it resolves.
-      //    This makes the list start populating within milliseconds of
-      //    the first GetChat response, rather than after all 10–30 resolve.
       await _streamChatDetails(send, result.chatIds, replace: true);
+
+      // If we got fewer than requested, maybe that's really all there is.
+      if (result.chatIds.length < _initialPageSize) {
+        hasMoreChats = false;
+      }
 
       state = state.copyWith(
         isLoading: false,
-        hasMore: result.chatIds.length >= _initialPageSize,
+        hasMore: hasMoreChats,
       );
     } catch (e) {
       Log.error('Failed to load chats', error: e, tag: 'CHAT_LIST');
@@ -126,29 +167,44 @@ class ChatListController extends StateNotifier<ChatListState> {
     try {
       final send = _ref.read(tdlibSendProvider);
 
-      // Ask TDLib for the next page from the server.
-      // ignore: prefer_const_constructors
-      final loadResult = await send(LoadChats(
+      final loadResult = await send(const LoadChats(
         chatList: null,
         limit: _pageSize,
       ));
 
-      if (loadResult is TdError && loadResult.code != 404) {
-        state = state.copyWith(isLoading: false);
-        return;
+      bool hasMoreChats = true;
+      if (loadResult is TdError) {
+        if (loadResult.code == 404) {
+          hasMoreChats = false;
+        } else {
+          state = state.copyWith(isLoading: false);
+          return;
+        }
       }
 
-      // GetChats always returns from the beginning of TDLib's ordered list.
-      // We request all chats up to our current position + one more page.
       final totalWanted = _fetchedSoFar + _pageSize;
-      // ignore: prefer_const_constructors
-      final result = await send(GetChats(
-        chatList: null,
-        limit: totalWanted,
-      ));
+      
+      // Pagination: Wait briefly for cache to update
+      Chats? result;
+      for (int i = 0; i < 4; i++) {
+        final res = await send(GetChats(
+          chatList: null,
+          limit: totalWanted,
+        ));
+        if (res is Chats && res.chatIds.length > _fetchedSoFar) {
+          result = res;
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
 
-      if (result is! Chats) {
-        state = state.copyWith(isLoading: false);
+      if (result == null) {
+        final res = await send(GetChats(chatList: null, limit: totalWanted));
+        if (res is Chats) result = res;
+      }
+
+      if (result == null) {
+        state = state.copyWith(isLoading: false, hasMore: false);
         return;
       }
 
@@ -158,8 +214,10 @@ class ChatListController extends StateNotifier<ChatListState> {
           result.chatIds.where((id) => !existingIds.contains(id)).toList();
 
       if (newIds.isEmpty) {
-        state = state.copyWith(isLoading: false, hasMore: false);
-        return;
+         // Either duplicate chats or truly no new chats fetched.
+         // If we didn't fetch any new ones despite trying, we are likely at the end.
+         state = state.copyWith(isLoading: false, hasMore: false);
+         return;
       }
 
       _fetchedSoFar = result.chatIds.length;
@@ -168,12 +226,62 @@ class ChatListController extends StateNotifier<ChatListState> {
 
       state = state.copyWith(
         isLoading: false,
-        hasMore: newIds.length >= _pageSize,
+        hasMore: hasMoreChats,
       );
     } catch (e) {
       Log.error('Failed to load more chats', error: e, tag: 'CHAT_LIST');
       state = state.copyWith(isLoading: false);
     }
+  }
+
+  // ── Search & Filter ─────────────────────────────────────────────
+
+  void toggleMediaOnly() {
+    state = state.copyWith(mediaOnly: !state.mediaOnly);
+  }
+
+  Future<void> searchChats(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      clearSearch();
+      return;
+    }
+
+    state = state.copyWith(
+      isSearchMode: true,
+      searchQuery: trimmed,
+      searchResults: [],
+      isSearching: true,
+      error: '',
+    );
+
+    try {
+      final send = _ref.read(tdlibSendProvider);
+
+      final result = await send(SearchChats(
+        query: trimmed,
+        limit: 50,
+      ));
+
+      if (result is Chats) {
+        await _streamChatDetails(send, result.chatIds, replace: true, isSearch: true);
+        state = state.copyWith(isSearching: false);
+      } else if (result is TdError) {
+        state = state.copyWith(isSearching: false, error: result.message);
+      }
+    } catch (e) {
+      Log.error('Failed to search chats', error: e, tag: 'CHAT_LIST');
+      state = state.copyWith(isSearching: false, error: e.toString());
+    }
+  }
+
+  void clearSearch() {
+    state = state.copyWith(
+      isSearchMode: false,
+      searchQuery: '',
+      searchResults: [],
+      isSearching: false,
+    );
   }
 
   // ── Private helpers ─────────────────────────────────────────────
@@ -187,10 +295,15 @@ class ChatListController extends StateNotifier<ChatListState> {
     Future<TdObject?> Function(TdFunction) send,
     List<int> chatIds, {
     required bool replace,
+    bool isSearch = false,
   }) async {
     if (replace) {
       // Kick off the initial empty list so the skeleton disappears quickly.
-      state = state.copyWith(chats: []);
+      if (isSearch) {
+        state = state.copyWith(searchResults: []);
+      } else {
+        state = state.copyWith(chats: []);
+      }
     }
 
     // Fire all requests concurrently but add each result to state
@@ -199,10 +312,8 @@ class ChatListController extends StateNotifier<ChatListState> {
       final item = await _fetchChatDetail(send, id);
       if (item == null || !mounted) return;
 
-      if (replace) {
-        // Append to whatever is already in state (other futures may have
-        // added items before this one resolved).
-        state = state.copyWith(chats: [...state.chats, item]);
+      if (isSearch) {
+        state = state.copyWith(searchResults: [...state.searchResults, item]);
       } else {
         state = state.copyWith(chats: [...state.chats, item]);
       }
@@ -224,6 +335,8 @@ class ChatListController extends StateNotifier<ChatListState> {
     final isGroup = detail.type is ChatTypeBasicGroup ||
         (detail.type is ChatTypeSupergroup &&
             !(detail.type as ChatTypeSupergroup).isChannel);
+    
+    final isForum = detail.isForum;
 
     String subtitle = '';
     if (isChannel) {
@@ -252,6 +365,7 @@ class ChatListController extends StateNotifier<ChatListState> {
       lastMessageDate: detail.lastMessage?.date ?? 0,
       isChannel: isChannel,
       isGroup: isGroup,
+      isForum: isForum,
     );
   }
 }

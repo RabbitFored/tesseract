@@ -54,8 +54,8 @@ class _AddLinkDialogState extends ConsumerState<AddLinkDialog> {
   }
 
   Future<void> _submit() async {
-    final url = _controller.text.trim();
-    if (url.isEmpty) return;
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
     if (_isLoading) return; // Prevent double-submit.
 
     setState(() {
@@ -65,25 +65,36 @@ class _AddLinkDialogState extends ConsumerState<AddLinkDialog> {
 
     final manager = ref.read(downloadManagerProvider);
 
-    String? error;
-    try {
-      // Enforce a 15-second client-side timeout so the dialog never hangs
-      // indefinitely regardless of TDLib's internal 40s timeout.
-      error = await manager.enqueueFromUrl(url).timeout(
-        const Duration(seconds: 15),
-        onTimeout: () => 'Request timed out. Please try again.',
-      );
-    } catch (e) {
-      error = 'Unexpected error: $e';
+    // Parse multiple links based on whitespace, commas, or newlines
+    final urls = text.split(RegExp(r'[\s,\n]+')).where((u) => u.isNotEmpty).toList();
+
+    int successCount = 0;
+    int failCount = 0;
+    String? firstError;
+
+    for (final url in urls) {
+      try {
+        final error = await manager.enqueueFromUrl(url).timeout(
+          const Duration(seconds: 15),
+          onTimeout: () => 'Request timed out for $url',
+        );
+        if (error != null) {
+          failCount++;
+          firstError ??= error;
+        } else {
+          successCount++;
+        }
+      } catch (e) {
+        failCount++;
+        firstError ??= 'Unexpected error: $e';
+      }
+
+      if (_cancelled || !mounted) return;
     }
 
-    // Guard: if the dialog was closed while the request was in-flight,
-    // do not attempt to call setState or Navigator — the widget is gone.
-    if (_cancelled || !mounted) return;
-
-    if (error != null) {
+    if (failCount > 0 && successCount == 0) {
       setState(() {
-        _error = error;
+        _error = urls.length > 1 ? 'Failed to resolve links. Error: $firstError' : firstError;
         _isLoading = false;
       });
     } else {
@@ -103,20 +114,22 @@ class _AddLinkDialogState extends ConsumerState<AddLinkDialog> {
     final theme = Theme.of(context);
 
     return AlertDialog(
-      title: const Text('Add from Link'),
+      title: const Text('Add Links'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            'Paste a public or private Telegram message link to download its attached file.',
+            'Paste Telegram message links to download their attached files. Separate multiple links with newlines or spaces.',
             style: theme.textTheme.bodyMedium,
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _controller,
             enabled: !_isLoading,
+            maxLines: 4,
+            minLines: 1,
             decoration: InputDecoration(
-              hintText: 'https://t.me/...',
+              hintText: 'https://t.me/...\nhttps://t.me/...',
               errorText: _error,
               border: const OutlineInputBorder(),
               contentPadding: const EdgeInsets.symmetric(
@@ -132,11 +145,14 @@ class _AddLinkDialogState extends ConsumerState<AddLinkDialog> {
                         final data =
                             await Clipboard.getData(Clipboard.kTextPlain);
                         if (!mounted) return;
-                        final text = data?.text?.trim() ?? '';
-                        if (text.isNotEmpty) {
-                          _controller.text = text;
+                        final clipboardText = data?.text?.trim() ?? '';
+                        if (clipboardText.isNotEmpty) {
+                          final newText = _controller.text.isEmpty
+                              ? clipboardText
+                              : '${_controller.text}\n$clipboardText';
+                          _controller.text = newText;
                           _controller.selection = TextSelection.fromPosition(
-                            TextPosition(offset: text.length),
+                            TextPosition(offset: newText.length),
                           );
                         }
                       },
@@ -144,7 +160,6 @@ class _AddLinkDialogState extends ConsumerState<AddLinkDialog> {
                   : null,
             ),
             autofocus: true,
-            onSubmitted: (_) => _submit(),
           ),
           // Loading progress indicator with hint.
           if (_isLoading) ...[

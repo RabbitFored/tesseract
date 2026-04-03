@@ -385,7 +385,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
         fromMessageId: currentFromId,
         offset: 0,
         limit: _pageSize,
-        filter: null, // No TDLib filter — we apply our own media filter.
+        filter: const SearchMessagesFilterDocument(), // Use document filter to search by file name
         messageThreadId: 0,
       ));
 

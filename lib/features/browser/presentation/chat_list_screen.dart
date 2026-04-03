@@ -20,6 +20,8 @@ class ChatListScreen extends ConsumerStatefulWidget {
 
 class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   final _scrollController = ScrollController();
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -33,6 +35,7 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -50,11 +53,47 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Browse Chats',
-          style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.5),
-        ),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Search chats...',
+                  border: InputBorder.none,
+                  hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                onChanged: (val) {
+                  ref.read(chatListControllerProvider.notifier).searchChats(val);
+                },
+              )
+            : const Text(
+                'Browse Chats',
+                style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.5),
+              ),
         centerTitle: false,
+        actions: [
+          IconButton(
+            icon: Icon(
+              state.mediaOnly ? Icons.filter_alt_rounded : Icons.filter_alt_outlined,
+              color: state.mediaOnly ? theme.colorScheme.primary : null,
+            ),
+            tooltip: 'Show Media Only',
+            onPressed: () => ref.read(chatListControllerProvider.notifier).toggleMediaOnly(),
+          ),
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close_rounded : Icons.search_rounded),
+            tooltip: 'Search Chats',
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchController.clear();
+                  ref.read(chatListControllerProvider.notifier).clearSearch();
+                }
+              });
+            },
+          ),
+        ],
       ),
       body: _buildBody(state, theme),
     );
@@ -62,11 +101,11 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
 
   Widget _buildBody(ChatListState state, ThemeData theme) {
     // Show skeletons when we are loading and have nothing to show yet.
-    if (state.isLoading && state.chats.isEmpty) {
+    if (state.isLoading && state.displayChats.isEmpty && !_isSearching) {
       return _SkeletonChatList(theme: theme);
     }
 
-    if (state.error.isNotEmpty && state.chats.isEmpty) {
+    if (state.error.isNotEmpty && state.displayChats.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -104,19 +143,23 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
       );
     }
 
-    if (state.chats.isEmpty) {
+    if (state.displayChats.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.chat_bubble_outline_rounded,
-              size: 56,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.15),
-            ),
+             if (state.isSearching) ...[
+                const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+             ] else
+               Icon(
+                 Icons.chat_bubble_outline_rounded,
+                 size: 56,
+                 color: theme.colorScheme.onSurface.withValues(alpha: 0.15),
+               ),
             const SizedBox(height: 16),
             Text(
-              'No chats found',
+              state.isSearching && state.isSearchMode ? 'Searching...' : 'No chats found',
               style: theme.textTheme.titleMedium?.copyWith(
                 color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
               ),
@@ -132,20 +175,18 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
       child: ListView.separated(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
-        // Extra slots: skeleton tiles when paginating + spinner at bottom.
-        itemCount: state.chats.length + (state.isLoading ? 3 : 0),
+        itemCount: state.displayChats.length + (state.isLoading ? 3 : 0),
         separatorBuilder: (_, __) => Divider(
           height: 0.5,
           indent: 72,
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
         ),
         itemBuilder: (context, index) {
-          // Render skeleton tiles at the end during pagination.
-          if (index >= state.chats.length) {
+          if (index >= state.displayChats.length) {
             return _SkeletonChatTile(theme: theme);
           }
 
-          final chat = state.chats[index];
+          final chat = state.displayChats[index];
           return ChatTile(
             chat: chat,
             onTap: () => Navigator.push(

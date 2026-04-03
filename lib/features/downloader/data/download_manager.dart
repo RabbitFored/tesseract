@@ -139,7 +139,7 @@ class DownloadManager {
 
     final newStatus = isComplete
         ? DownloadStatus.completed
-        : (downloadedSize > 0
+        : (local.isDownloadingActive
             ? DownloadStatus.downloading
             : item.status);
 

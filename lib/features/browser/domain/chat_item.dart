@@ -10,6 +10,8 @@ class ChatItem {
     this.memberCount = 0,
     this.isChannel = false,
     this.isGroup = false,
+    this.isForum = false,
+    this.hasMedia = true,
   });
 
   final int id;
@@ -21,6 +23,8 @@ class ChatItem {
   final int memberCount;
   final bool isChannel;
   final bool isGroup;
+  final bool isForum;
+  final bool hasMedia;
 
   /// Initials for avatar placeholder.
   String get initials {

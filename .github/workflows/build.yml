@@ -68,21 +68,19 @@ jobs:
       - name: Run unit & widget tests
         run: flutter test
 
-      # ── Build APK (arm64-v8a only, split, obfuscated) ─────────
-      # Key size optimizations vs the old build command:
-      #   --target-platform android-arm64   → skips x86/x86_64/arm32 AOT code
-      #   --split-per-abi                   → one APK per ABI (arm64 only here)
-      #   --obfuscate + --split-debug-info  → strips debug symbols from binary
-      #   Remove --no-tree-shake-icons      → enables dead-code elimination on icons
-      #   --shrink                          → R8/ProGuard shrinks Kotlin/Java bytecode
+      # ── Build APK (arm64-v8a only, split) ──────────────────────
+      # Size optimizations:
+      #   --target-platform android-arm64   → arm64 AOT only (no x86/arm32)
+      #   --split-per-abi                   → one APK per ABI
+      # NOTE: --obfuscate is intentionally excluded — it triggers Google Play
+      # Protect "scan before install" warnings on sideloaded APKs because
+      # obfuscated code is indistinguishable from malware patterns to Play Protect.
       - name: Build release APK (arm64 only)
         run: >
           flutter build apk
           --release
           --target-platform android-arm64
           --split-per-abi
-          --obfuscate
-          --split-debug-info=build/debug-info
           --dart-define=TELEGRAM_API_ID=${{ secrets.TELEGRAM_API_ID }}
           --dart-define=TELEGRAM_API_HASH=${{ secrets.TELEGRAM_API_HASH }}
 
@@ -103,15 +101,6 @@ jobs:
           path: build/app/outputs/flutter-apk/*arm64*.apk
           retention-days: 30
           if-no-files-found: error
-
-      # ── Upload debug symbols (for crash symbolication) ────────
-      - name: Upload debug symbols
-        uses: actions/upload-artifact@v4
-        with:
-          name: tesseract-debug-symbols
-          path: build/debug-info/
-          retention-days: 30
-          if-no-files-found: warn
 
       # ── (Optional) Create GitHub Release on version tags ──────
       - name: Create GitHub Release

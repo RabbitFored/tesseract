@@ -16,6 +16,9 @@ class SpeedTracker {
   /// Per-file: last known downloaded_size snapshot.
   final _snapshots = <int, int>{}; // fileId → downloadedSize
 
+  /// Per-file: the latest downloaded_size reported.
+  final _currentSizes = <int, int>{};
+
   /// Per-file: current bytes/second.
   final _speeds = <int, int>{}; // fileId → bytesPerSecond
 
@@ -53,6 +56,7 @@ class SpeedTracker {
     _running = false;
     _globalSpeed = 0;
     _snapshots.clear();
+    _currentSizes.clear();
     _speeds.clear();
     // Don't clear history — keep it for the graph fade-out.
     _history.addLast(0);
@@ -74,11 +78,13 @@ class SpeedTracker {
       // First report for this file — seed the snapshot.
       _snapshots[fileId] = downloadedSize;
     }
+    _currentSizes[fileId] = downloadedSize;
   }
 
   /// Remove a file from tracking (completed, paused, removed).
   void removeFile(int fileId) {
     _snapshots.remove(fileId);
+    _currentSizes.remove(fileId);
     _speeds.remove(fileId);
   }
 
@@ -87,10 +93,17 @@ class SpeedTracker {
   void _tick() {
     int totalSpeed = 0;
 
-    // Per-file speeds are computed by computeSpeed() on each TDLib UpdateFile
-    // event. Here we just re-sum them to update the global speed and history.
-    for (final fileId in _snapshots.keys.toList()) {
-      totalSpeed += _speeds[fileId] ?? 0;
+    for (final fileId in _currentSizes.keys.toList()) {
+      final currentSize = _currentSizes[fileId]!;
+      final prevSize = _snapshots[fileId] ?? currentSize;
+      
+      final delta = (currentSize - prevSize).clamp(0, double.maxFinite.toInt());
+      _speeds[fileId] = delta;
+      
+      // Reset snapshot for the next 1-second interval
+      _snapshots[fileId] = currentSize;
+      
+      totalSpeed += delta;
     }
 
     _globalSpeed = totalSpeed;
@@ -99,18 +112,9 @@ class SpeedTracker {
     _trimHistory();
   }
 
-  /// Compute speed for a specific file. Call this from DownloadManager
-  /// after updating the snapshot.
+  /// Deprecated. Speeds are calculated purely in _tick() now.
   int computeSpeed(int fileId, int newDownloadedSize) {
-    final prevSize = _snapshots[fileId] ?? newDownloadedSize;
-    final delta = (newDownloadedSize - prevSize).clamp(0, double.maxFinite.toInt());
-    _snapshots[fileId] = newDownloadedSize;
-    _speeds[fileId] = delta;
-
-    // Recalculate global speed as sum of all file speeds.
-    _globalSpeed = _speeds.values.fold(0, (sum, s) => sum + s);
-
-    return delta;
+    return _speeds[fileId] ?? 0;
   }
 
   void _trimHistory() {
