@@ -1,7 +1,7 @@
 name: tesseract
 description: A modern, unofficial Telegram client for Android focused on advanced file downloading.
 publish_to: 'none'
-version: 1.0.1+2
+version: 1.0.1
 developer: Struthio
 
 environment:
