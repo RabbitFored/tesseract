@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' as io;
 
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -364,10 +365,14 @@ class DownloadManager {
 
   Future<void> removeFromQueue(int fileId) async {
     final item = await _db.getByFileId(fileId);
-    if (item != null && item.isActive) {
+    if (item != null) {
       final send = _ref.read(tdlibSendProvider);
-      await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
-      _speed.removeFile(fileId);
+      if (item.isActive) {
+        await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+        _speed.removeFile(fileId);
+      }
+      // Delete from TDLib completely to prevent "sticky" completion on re-add
+      await send(DeleteFile(fileId: fileId));
     }
     await _db.delete(fileId);
     _notifyChange();
@@ -380,9 +385,12 @@ class DownloadManager {
     final send = _ref.read(tdlibSendProvider);
     for (final fileId in fileIds) {
       final item = await _db.getByFileId(fileId);
-      if (item != null && item.isActive) {
-        await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
-        _speed.removeFile(fileId);
+      if (item != null) {
+        if (item.isActive) {
+          await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+          _speed.removeFile(fileId);
+        }
+        await send(DeleteFile(fileId: fileId));
       }
       await _db.delete(fileId);
     }
@@ -474,8 +482,20 @@ class DownloadManager {
         return null;
       }
 
+      if (await targetFile.exists()) {
+        await targetFile.delete();
+      }
+
       await sourceFile.copy(targetPath);
       Log.info('Exported: ${item.fileName} → $targetPath', tag: 'DL_MGR');
+
+      try {
+        const platform = MethodChannel('tesseract/media_scanner');
+        await platform.invokeMethod('scanFile', {'path': targetPath});
+      } catch (e) {
+        Log.error('Failed to trigger media scan for $targetPath: $e', tag: 'DL_MGR');
+      }
+
       return targetPath;
     } catch (e) {
       Log.error('Failed to export file "${item.fileName}": $e', error: e, tag: 'DL_MGR');

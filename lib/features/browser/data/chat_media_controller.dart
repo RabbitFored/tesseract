@@ -88,7 +88,7 @@ class ChatMediaState {
 }
 
 /// Family provider: one controller per config.
-final chatMediaControllerProvider = StateNotifierProvider.family<
+final chatMediaControllerProvider = StateNotifierProvider.family.autoDispose<
     ChatMediaController, ChatMediaState, ChatMediaConfig>(
   (ref, config) => ChatMediaController(ref, config),
 );
@@ -342,14 +342,14 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       // background. Wait briefly and retry (more aggressively for topic threads).
       if (msgs.isEmpty && batch == 0 && currentFromId == 0) {
         final isThread = _messageThreadId != 0;
-        final maxRetries = isThread ? 3 : 1;
+        final maxRetries = isThread ? 5 : 1;
         Log.info(
           '${isThread ? "GetMessageThreadHistory" : "GetChatHistory"} returned empty on first call — retrying ($maxRetries attempts)',
           tag: 'CHAT_MEDIA',
         );
 
         for (int retry = 0; retry < maxRetries; retry++) {
-          await Future.delayed(Duration(milliseconds: 900 + (retry * 500)));
+          await Future.delayed(Duration(milliseconds: (isThread ? 1500 : 900) + (retry * 500)));
 
           TdObject? retryResult;
           if (isThread) {
@@ -408,8 +408,10 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       _oldestMessageId = msgs.last.id;
       currentFromId = _oldestMessageId;
 
-      // A short batch means TDLib has no more history.
-      if (msgs.length < _pageSize) {
+      // A short batch means TDLib has no more history, but for topics it might
+      // just be a small locally populated chunk. Be conservative and only
+      // mark exhausted if we got strictly 0 messages.
+      if (msgs.length == 0) {
         definitivelyExhausted = true;
         break;
       }

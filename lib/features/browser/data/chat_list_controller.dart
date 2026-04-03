@@ -111,10 +111,12 @@ class ChatListController extends StateNotifier<ChatListState> {
 
     try {
       final send = _ref.read(tdlibSendProvider);
+      
+      final int limit = forceRefresh && _fetchedSoFar > _pageSize ? _fetchedSoFar : _initialPageSize;
 
-      final loadResult = await send(const LoadChats(
+      final loadResult = await send(LoadChats(
         chatList: null,
-        limit: _initialPageSize,
+        limit: limit,
       ));
 
       bool hasMoreChats = true;
@@ -130,9 +132,9 @@ class ChatListController extends StateNotifier<ChatListState> {
       // Initial load: Wait for local cache to populate if it's currently empty.
       Chats? result;
       for (int i = 0; i < 6; i++) {
-        final res = await send(const GetChats(
+        final res = await send(GetChats(
           chatList: null,
-          limit: _initialPageSize,
+          limit: limit,
         ));
         if (res is Chats && res.chatIds.isNotEmpty) {
           result = res;
@@ -142,7 +144,7 @@ class ChatListController extends StateNotifier<ChatListState> {
       }
 
       if (result == null) {
-        final res = await send(const GetChats(chatList: null, limit: _initialPageSize));
+        final res = await send(GetChats(chatList: null, limit: limit));
         if (res is Chats) {
           result = res;
         }
@@ -175,14 +177,16 @@ class ChatListController extends StateNotifier<ChatListState> {
   Future<void> _refreshInBackground() async {
     try {
       final send = _ref.read(tdlibSendProvider);
+      
+      final int limit = _fetchedSoFar > _pageSize ? _fetchedSoFar : _pageSize;
 
       // Ask TDLib to load fresh data from server.
-      await send(const LoadChats(chatList: null, limit: _initialPageSize));
+      await send(LoadChats(chatList: null, limit: limit));
 
       // Get the latest chat list from cache.
-      final res = await send(const GetChats(
+      final res = await send(GetChats(
         chatList: null,
-        limit: _initialPageSize,
+        limit: limit,
       ));
 
       if (res is Chats && res.chatIds.isNotEmpty) {

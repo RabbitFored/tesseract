@@ -245,25 +245,49 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
               ? 'No ${_filterType!.name} files found'
               : 'No media files in this chat';
 
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+      return RefreshIndicator(
+        onRefresh: () => ref
+            .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
+            .reload(),
+        child: LayoutBuilder(
+          builder: (context, constraints) => ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             children: [
-              Icon(
-                state.isSearchMode
-                    ? Icons.search_off_rounded
-                    : Icons.perm_media_outlined,
-                size: 56,
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.15),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                emptyText,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+              Container(
+                height: constraints.maxHeight,
+                alignment: Alignment.center,
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        state.isSearchMode
+                            ? Icons.search_off_rounded
+                            : Icons.perm_media_outlined,
+                        size: 56,
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.15),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        emptyText,
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      if (!state.isSearchMode) ...[
+                        const SizedBox(height: 24),
+                        FilledButton.icon(
+                          onPressed: () => ref
+                              .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
+                              .reload(),
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Refresh'),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ],
