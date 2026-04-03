@@ -133,13 +133,18 @@ class TdLibClient {
   }
 
   /// Poll TDLib for pending events (called by the periodic timer).
+  /// Drains ALL available events per tick to prevent backlog buildup
+  /// during active downloads (UpdateFile floods).
   void _pollReceive() {
     if (_clientId == 0) return;
 
-    // tdReceive with timeout=0 returns immediately if nothing is available.
-    // The 50ms timer interval provides the actual polling cadence.
-    final result = tdReceive(0);
-    if (result != null) {
+    // Drain all queued events in one tick. Without this loop,
+    // only one event is processed per 50ms — if TDLib generates
+    // 50+ UpdateFile events/second during downloads, responses to
+    // new send() calls get buried behind a growing backlog.
+    while (true) {
+      final result = tdReceive(0);
+      if (result == null) break;
       if (!_updateController.isClosed) {
         _updateController.add(result);
       }
