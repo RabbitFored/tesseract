@@ -127,6 +127,13 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
   //  DEFAULT MODE — History browsing
   // ══════════════════════════════════════════════════════════════
 
+  /// Force-reload media (used by pull-to-refresh).
+  Future<void> reload() async {
+    state = state.copyWith(isLoading: false); // Reset guard
+    _oldestMessageId = 0;
+    await loadMedia();
+  }
+
   /// Load the initial batch of media messages.
   ///
   /// Always sets [hasMore] = true after the first load so that
@@ -332,16 +339,20 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       // ── TDLib Cache Warmup Retry ─────────────────────────────
       // On the very first call (fromMessageId == 0), TDLib may return an
       // empty list because the server fetch is still in progress in the
-      // background. Wait briefly and retry once.
+      // background. Wait briefly and retry (more aggressively for topic threads).
       if (msgs.isEmpty && batch == 0 && currentFromId == 0) {
+        final isThread = _messageThreadId != 0;
+        final maxRetries = isThread ? 3 : 1;
         Log.info(
-          'GetChatHistory returned empty on first call — retrying after cache warmup',
+          '${isThread ? "GetMessageThreadHistory" : "GetChatHistory"} returned empty on first call — retrying ($maxRetries attempts)',
           tag: 'CHAT_MEDIA',
         );
-        await Future.delayed(const Duration(milliseconds: 900));
 
-        TdObject? retryResult;
-        if (_messageThreadId != 0) {
+        for (int retry = 0; retry < maxRetries; retry++) {
+          await Future.delayed(Duration(milliseconds: 900 + (retry * 500)));
+
+          TdObject? retryResult;
+          if (isThread) {
             retryResult = await send(GetMessageThreadHistory(
               chatId: _chatId,
               messageId: _messageThreadId,
@@ -349,7 +360,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
               offset: 0,
               limit: _pageSize,
             ));
-        } else {
+          } else {
             retryResult = await send(GetChatHistory(
               chatId: _chatId,
               fromMessageId: 0,
@@ -357,26 +368,30 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
               limit: _pageSize,
               onlyLocal: false,
             ));
+          }
+
+          if (retryResult is Messages && retryResult.messages.isNotEmpty) {
+            // Use retry result.
+            for (final msg in retryResult.messages) {
+              final media = MediaMessage.fromTdlibMessage(msg);
+              if (media != null) collected.add(media);
+            }
+            _oldestMessageId = retryResult.messages.last.id;
+            currentFromId = _oldestMessageId;
+
+            if (retryResult.messages.length < _pageSize) {
+              definitivelyExhausted = true;
+            }
+            break; // Got data, stop retrying.
+          }
         }
 
-        if (retryResult is! Messages || retryResult.messages.isEmpty) {
-          // Genuinely empty chat or no media at all — allow another attempt later.
+        if (collected.isEmpty) {
+          // Genuinely empty — allow another attempt later from UI refresh.
           _hasMoreAfterFetch = true;
           return collected;
         }
-
-        // Use retry result.
-        for (final msg in retryResult.messages) {
-          final media = MediaMessage.fromTdlibMessage(msg);
-          if (media != null) collected.add(media);
-        }
-        _oldestMessageId = retryResult.messages.last.id;
-        currentFromId = _oldestMessageId;
-
-        if (retryResult.messages.length < _pageSize) {
-          definitivelyExhausted = true;
-          break;
-        }
+        if (definitivelyExhausted) break;
         continue;
       }
 

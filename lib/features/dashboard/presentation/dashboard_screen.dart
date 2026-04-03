@@ -187,12 +187,88 @@ class _ActiveTab extends ConsumerWidget {
 
 // ── Completed tab ───────────────────────────────────────────────
 
-class _CompletedTab extends ConsumerWidget {
+class _CompletedTab extends ConsumerStatefulWidget {
   const _CompletedTab();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_CompletedTab> createState() => _CompletedTabState();
+}
+
+class _CompletedTabState extends ConsumerState<_CompletedTab> {
+  final Set<int> _selected = {};
+  bool _isSelectionMode = false;
+
+  void _toggleSelection(int fileId) {
+    setState(() {
+      if (_selected.contains(fileId)) {
+        _selected.remove(fileId);
+        if (_selected.isEmpty) _isSelectionMode = false;
+      } else {
+        _selected.add(fileId);
+      }
+    });
+  }
+
+  void _selectAll(List<DownloadItem> items) {
+    setState(() {
+      _selected.addAll(items.map((i) => i.fileId));
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selected.clear();
+      _isSelectionMode = false;
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selected.isEmpty) return;
+
+    final count = _selected.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete files?'),
+        content: Text(
+          'Remove $count completed ${count == 1 ? 'file' : 'files'} from the download list?\n\n'
+          'Downloaded files on storage will not be deleted.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final manager = ref.read(downloadManagerProvider);
+    await manager.removeMultiple(_selected.toList());
+    _clearSelection();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Removed $count files'),
+          backgroundColor: const Color(0xFF2AABEE),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final completed = ref.watch(completedDownloadsProvider);
+    final theme = Theme.of(context);
 
     if (completed.isEmpty) {
       return const EmptyDownloadState(
@@ -202,9 +278,90 @@ class _CompletedTab extends ConsumerWidget {
       );
     }
 
-    return _AnimatedDownloadList(
-      items: completed,
-      listKey: 'completed',
+    return Column(
+      children: [
+        // ── Selection action bar ─────────────────────────────
+        if (_isSelectionMode)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: _clearSelection,
+                  tooltip: 'Cancel',
+                  visualDensity: VisualDensity.compact,
+                ),
+                Text(
+                  '${_selected.length} selected',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => _selectAll(completed),
+                  icon: const Icon(Icons.select_all_rounded, size: 18),
+                  label: const Text('All'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF2AABEE),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: _selected.isEmpty ? null : _deleteSelected,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('Delete'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // ── List ─────────────────────────────────────────────
+        Expanded(
+          child: _isSelectionMode
+              ? ListView.builder(
+                  padding: const EdgeInsets.only(top: 4, bottom: 80),
+                  itemCount: completed.length,
+                  itemBuilder: (context, index) {
+                    final item = completed[index];
+                    final isSelected = _selected.contains(item.fileId);
+                    return InkWell(
+                      onTap: () => _toggleSelection(item.fileId),
+                      child: Row(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: Checkbox(
+                              value: isSelected,
+                              onChanged: (_) => _toggleSelection(item.fileId),
+                              activeColor: const Color(0xFF2AABEE),
+                            ),
+                          ),
+                          Expanded(child: DownloadItemCard(item: item)),
+                        ],
+                      ),
+                    );
+                  },
+                )
+              : _AnimatedDownloadList(
+                  items: completed,
+                  listKey: 'completed',
+                  onLongPress: (fileId) {
+                    setState(() {
+                      _isSelectionMode = true;
+                      _selected.add(fileId);
+                    });
+                  },
+                ),
+        ),
+      ],
     );
   }
 }
@@ -215,10 +372,12 @@ class _AnimatedDownloadList extends StatefulWidget {
   const _AnimatedDownloadList({
     required this.items,
     required this.listKey,
+    this.onLongPress,
   });
 
   final List<DownloadItem> items;
   final String listKey;
+  final void Function(int fileId)? onLongPress;
 
   @override
   State<_AnimatedDownloadList> createState() => _AnimatedDownloadListState();
@@ -291,7 +450,12 @@ class _AnimatedDownloadListState extends State<_AnimatedDownloadList> {
       sizeFactor: animation,
       child: FadeTransition(
         opacity: animation,
-        child: DownloadItemCard(item: item),
+        child: GestureDetector(
+          onLongPress: widget.onLongPress != null
+              ? () => widget.onLongPress!(item.fileId)
+              : null,
+          child: DownloadItemCard(item: item),
+        ),
       ),
     );
   }

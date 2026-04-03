@@ -272,25 +272,30 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
       );
     }
 
-    return ListView.separated(
-      controller: _scrollController,
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(bottom: 80),
-      itemCount: media.length + (isLoadingMore ? 1 : 0),
-      separatorBuilder: (_, __) => Divider(
-        height: 0.5,
-        indent: 72,
-        color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+    return RefreshIndicator(
+      onRefresh: () => ref
+          .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
+          .reload(),
+      child: ListView.separated(
+        controller: _scrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 80),
+        itemCount: media.length + (isLoadingMore ? 1 : 0),
+        separatorBuilder: (_, __) => Divider(
+          height: 0.5,
+          indent: 72,
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+        ),
+        itemBuilder: (context, index) {
+          if (index >= media.length) {
+            return const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return MediaFileTile(media: media[index]);
+        },
       ),
-      itemBuilder: (context, index) {
-        if (index >= media.length) {
-          return const Padding(
-            padding: EdgeInsets.all(16),
-            child: Center(child: CircularProgressIndicator()),
-          );
-        }
-        return MediaFileTile(media: media[index]);
-      },
     );
   }
 

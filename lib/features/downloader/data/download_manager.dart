@@ -383,6 +383,22 @@ class DownloadManager {
     await _processQueue();
   }
 
+  /// Remove multiple downloads by fileId (batch delete).
+  Future<void> removeMultiple(List<int> fileIds) async {
+    final send = _ref.read(tdlibSendProvider);
+    for (final fileId in fileIds) {
+      final item = await _db.getByFileId(fileId);
+      if (item != null && item.isActive) {
+        await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+        _speed.removeFile(fileId);
+      }
+      await _db.delete(fileId);
+    }
+    _notifyChange();
+    _pushProgressToService();
+    await _processQueue();
+  }
+
   Future<void> pauseAll() async {
     final active = await _db.getByStatus(DownloadStatus.downloading);
     for (final item in active) {
@@ -420,7 +436,7 @@ class DownloadManager {
 
   // ── Smart categorization ─────────────────────────────────────
 
-  /// Exports the downloaded file to the public Downloads directory.
+  /// Exports the downloaded file to the user's chosen download directory.
   /// Returns the new path on success, or null if it failed.
   Future<String?> _exportCompletedFile(
       DownloadItem item, String sourcePath) async {
@@ -428,30 +444,42 @@ class DownloadManager {
     if (sourcePath.isEmpty) return null;
 
     try {
-      final status = await Permission.storage.request();
-      if (!status.isGranted) {
+      // On Android 11+, we need MANAGE_EXTERNAL_STORAGE.
+      // On older versions, plain STORAGE suffices.
+      var granted = await Permission.manageExternalStorage.isGranted;
+      if (!granted) {
         final manageStatus = await Permission.manageExternalStorage.request();
-        if (!manageStatus.isGranted) {
-          Log.error('Storage permission denied', tag: 'DL_MGR');
-          return null;
-        }
+        granted = manageStatus.isGranted;
+      }
+      if (!granted) {
+        // Fallback to legacy storage permission for older Android.
+        final legacyStatus = await Permission.storage.request();
+        granted = legacyStatus.isGranted;
+      }
+      if (!granted) {
+        Log.error('Storage permission denied — file stays in TDLib cache', tag: 'DL_MGR');
+        return null;
       }
 
       final targetPath = settings.resolveDownloadPath(item.fileName);
       final targetFile = IOFile(targetPath);
-      
+
+      // Create parent directories.
       if (!await targetFile.parent.exists()) {
         await targetFile.parent.create(recursive: true);
       }
 
       final sourceFile = IOFile(sourcePath);
-      if (await sourceFile.exists()) {
-        await sourceFile.copy(targetPath);
-        Log.info('Exported: ${item.fileName} → $targetPath', tag: 'DL_MGR');
-        return targetPath;
+      if (!await sourceFile.exists()) {
+        Log.error('Source file missing: $sourcePath', tag: 'DL_MGR');
+        return null;
       }
+
+      await sourceFile.copy(targetPath);
+      Log.info('Exported: ${item.fileName} → $targetPath', tag: 'DL_MGR');
+      return targetPath;
     } catch (e) {
-      Log.error('Failed to export file to external storage', error: e, tag: 'DL_MGR');
+      Log.error('Failed to export file: $e', error: e, tag: 'DL_MGR');
     }
     return null;
   }

@@ -334,29 +334,27 @@ class ChatListController extends StateNotifier<ChatListState> {
             !(detail.type as ChatTypeSupergroup).isChannel);
     
     bool isForum = false;
-    
+
+    // Only fetch supergroup info for supergroups, with a timeout
+    // to prevent blocking if TDLib is congested.
     if (detail.type is ChatTypeSupergroup) {
+      try {
         final sgResult = await send(GetSupergroup(
-            supergroupId: (detail.type as ChatTypeSupergroup).supergroupId));
+          supergroupId: (detail.type as ChatTypeSupergroup).supergroupId,
+        )).timeout(const Duration(seconds: 5), onTimeout: () => null);
         if (sgResult is Supergroup) {
-            isForum = sgResult.isForum;
+          isForum = sgResult.isForum;
         }
+      } catch (_) {
+        // Non-critical — default isForum=false is safe.
+      }
     }
 
-    bool hasMedia = true;
-    final mediaResult = await send(SearchChatMessages(
-        chatId: detail.id,
-        query: '',
-        senderId: null,
-        filter: const SearchMessagesFilterDocument(),
-        fromMessageId: 0,
-        offset: 0,
-        limit: 1,
-        messageThreadId: 0,
-    ));
-    if (mediaResult is FoundChatMessages) {
-        hasMedia = mediaResult.totalCount > 0;
-    }
+    // Skip the expensive SearchChatMessages probe here. It was causing
+    // TDLib request congestion that prevented private/basic chats from
+    // ever resolving. Default hasMedia=true; the mediaOnly toggle still
+    // works but assumes all chats might have media.
+    const hasMedia = true;
 
     String subtitle = '';
     if (isChannel) {
