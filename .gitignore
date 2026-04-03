@@ -1,27 +1,56 @@
-# Telegram Downloader – .gitignore
+# Tesseract – Comprehensive .gitignore
 
-# Flutter / Dart
+# ── Flutter / Dart ───────────────────────────────────────────
 .dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
 .packages
+.pub-cache/
+.pub/
 build/
+**/*.g.dart
+**/*.freezed.dart
+**/*.mocks.dart
+
+# ── Android ──────────────────────────────────────────────────
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/release-keystore.jks
+android/app/google-services.json
+*.jks
+*.keystore
+
+# ── iOS ──────────────────────────────────────────────────────
+ios/.symlinks/
+ios/Pods/
+ios/Runner/Generated.xcconfig
+ios/Runner/flutter_export_environment.sh
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ServiceDefinitions.json
+
+# ── macOS / Linux / Windows ──────────────────────────────────
+bin/
+linux/flutter/ephemeral/
+macos/Flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# ── IDEs & System ────────────────────────────────────────────
+.idea/
+.vscode/
 *.iml
 *.ipr
 *.iws
-.idea/
-
-# Android
-android/.gradle/
-android/app/release-keystore.jks
-android/key.properties
-android/local.properties
-
-# iOS (not used yet, but just in case)
-ios/Pods/
-ios/.symlinks/
-
-# Misc
-*.log
 .DS_Store
+Thumbs.db
+*.log
+
+# ── Environment & Secrets ─────────────────────────────────────
 .env
-.agents/
+.env.*
+!.env.example
 test_tdlib.dart
+.agents/
+knowledge/
+brain/
