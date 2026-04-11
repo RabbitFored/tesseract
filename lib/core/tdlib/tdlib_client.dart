@@ -250,13 +250,13 @@ class _DualFormatTdlibParameters extends TdFunction {
     // Newer TDLib >= 1.8.0 requires them flattened on the root.
     // We send BOTH to safely cross ABI breaks between the Dart generator and C binaries.
     return {
-      "@type": "setTdlibParameters",
-      "@extra": extra,
-      "parameters": {"@type": "tdlibParameters", ...params},
+      '@type': 'setTdlibParameters',
+      '@extra': extra,
+      'parameters': {'@type': 'tdlibParameters', ...params},
       ...params,
     };
   }
 
   @override
-  String getConstructor() => "setTdlibParameters";
+  String getConstructor() => 'setTdlibParameters';
 }
