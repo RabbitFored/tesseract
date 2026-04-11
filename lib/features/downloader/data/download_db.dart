@@ -252,6 +252,21 @@ class DownloadDb {
     );
   }
 
+  /// Hot-swaps the underlying `file_id` mapping when TDLib invalidates the cache geometry 
+  /// (used for corrupted chunk recovery).
+  Future<int> migrateFileId({required int oldFileId, required int newFileId}) async {
+    final db = await database;
+    // Don't error out if they are the same
+    if (oldFileId == newFileId) return 0;
+    
+    return db.update(
+      _table,
+      {'file_id': newFileId},
+      where: 'file_id = ?',
+      whereArgs: [oldFileId],
+    );
+  }
+
   /// Reset all "downloading" items back to "queued" (crash recovery).
   Future<int> resetStaleDownloads() async {
     final db = await database;

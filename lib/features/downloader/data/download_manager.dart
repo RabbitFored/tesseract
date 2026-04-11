@@ -165,9 +165,10 @@ class DownloadManager {
     if (isComplete) {
       newStatus = DownloadStatus.completed;
     } else if (item.status != DownloadStatus.paused && item.status != DownloadStatus.error) {
+      // If TDLib natively stops the download stream (network drop, disconnected), flag it as error.
       newStatus = local.isDownloadingActive
           ? DownloadStatus.downloading
-          : item.status;
+          : DownloadStatus.error;
     }
 
     if (isComplete && local.path.isNotEmpty) {
@@ -381,25 +382,48 @@ class DownloadManager {
     await _processQueue();
   }
 
-  /// Bug 3 fix: Dedicated retry method that fully resets download state.
-  /// Unlike resumeDownload(), this clears downloaded progress and error state
-  /// so TDLib starts fresh instead of trying to resume a corrupted partial.
   Future<void> retryDownload(int fileId) async {
     if (_resourceMonitor.isPausedByResource) return;
 
-    // Cancel any stale TDLib state for this file.
-    // send() returns a TdError if it fails, it does not throw.
+    final item = await _db.getByFileId(fileId);
+    if (item == null) return;
+
     final send = _ref.read(tdlibSendProvider);
     await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+    // Purge the heavily corrupted chunk from the native TDLib cache so it stops 
+    // instantly bottlenecking any internal resume attempts.
+    await send(DeleteFile(fileId: fileId));
 
-    // Reset progress, error state, and re-queue.
-    await _db.resetForRetry(fileId);
-    _speed.removeFile(fileId);
+    int currentFileId = fileId;
+
+    // Because DeleteFile structurally invalidated the original `fileId` integer,
+    // we must dynamically rebuild the File cache map and fetch the new `fileId`
+    // using the immutable chat & message signature.
+    if (item.chatId != 0 && item.messageId != 0) {
+      try {
+        final messageResult = await send(GetMessage(
+          chatId: item.chatId,
+          messageId: item.messageId,
+        ));
+        
+        if (messageResult is Message) {
+          final media = MediaMessage.fromTdlibMessage(messageResult);
+          if (media != null && media.fileId != currentFileId) {
+            // Hot-swap the primary key in our SQLite database instantly
+            await _db.migrateFileId(oldFileId: currentFileId, newFileId: media.fileId);
+            currentFileId = media.fileId;
+          }
+        }
+      } catch (e) {
+        Log.error('Failed to rebuild file mapping: $e', tag: 'DL_MGR');
+      }
+    }
+
+    // Reset progress, error state, and re-queue using the dynamically resolved file marker.
+    await _db.resetForRetry(currentFileId);
+    _speed.removeFile(currentFileId);
     _notifyChange();
 
-    // Give TDLib 200ms to fully flush the deleted file entry from its internal
-    // cache before re-requesting it. Without this, DownloadFile may reference
-    // stale metadata and immediately error out.
     await Future<void>.delayed(const Duration(milliseconds: 200));
     await _processQueue();
   }
@@ -626,13 +650,16 @@ class DownloadManager {
 
   // ── Helpers ──────────────────────────────────────────────────
 
-  void _handleTdlibResult(int fileId, TdObject? result) {
+  Future<void> _handleTdlibResult(int fileId, TdObject? result) async {
     if (result is TdError) {
       Log.error('TDLib download error for fileId=$fileId: '
           '${result.code} ${result.message}');
       _db.updateStatus(fileId, DownloadStatus.error);
       _speed.removeFile(fileId);
       _notifyChange();
+    } else if (result is File) {
+      // Directly loop synchronous load completions back through the state map.
+      await _handleFileUpdate(result);
     }
   }
 
