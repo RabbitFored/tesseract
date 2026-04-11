@@ -54,6 +54,7 @@ dependencies:
   # Archive extraction (pure Dart — safe for compute() isolates)
   archive: ^3.6.1
   file_picker: ^10.3.10
+  sqflite_common_ffi: ^2.4.0+2
 
 dev_dependencies:
   flutter_test:
