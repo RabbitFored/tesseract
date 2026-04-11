@@ -132,14 +132,12 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      # Optional: Depending on the tdlib dart package implementation, you may need to download
-      # tdjson.dll and place it next to the compiled executable. We add a placeholder here.
-      # - name: Setup tdjson.dll
-      #   run: |
-      #     Invoke-WebRequest -Uri "https://github.com/tdlib/td/releases/download/.../tdlib.zip" -OutFile tdlib.zip
-      #     Expand-Archive tdlib.zip -DestinationPath tdlib
-      #     Copy-Item tdlib/tdjson.dll build/windows/x64/runner/Release/
-
+      - name: Setup tdjson.dll from NuGet
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/tdlib.native/1.8.0" -OutFile tdlib.zip
+          Expand-Archive tdlib.zip -DestinationPath tdlib_native
+          Copy-Item "tdlib_native\runtimes\win-x64\native\*.dll" -Destination "build\windows\x64\runner\Release\"
       - name: Build Windows release
         run: >
           flutter build windows --release
