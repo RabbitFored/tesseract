@@ -71,6 +71,10 @@ class TdLibClient {
     _clientId = tdCreate();
     debugPrint('[TdLibClient] Created native client id=$_clientId');
 
+    // Silence the massively verbose C++ internal logging polluting PowerShell/stdout.
+    // Level 1 = Warnings/Errors only. 
+    tdExecute(const SetLogVerbosityLevel(newVerbosityLevel: 1));
+
     // Start the receive loop BEFORE sending any request, so we never
     // miss an event that arrives between tdSend() and the await below.
     _startReceiveLoop();
