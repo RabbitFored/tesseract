@@ -80,7 +80,7 @@ class TdLibClient {
     final authStateFuture = updates
         .where((e) {
           debugPrint('[TdLibClient] Received update: ${e.runtimeType}');
-          return e is UpdateAuthorizationState;
+          return e is UpdateAuthorizationState || e is TdError;
         })
         .first
         .timeout(
@@ -130,7 +130,10 @@ class TdLibClient {
     debugPrint('[TdLibClient] SetTdlibParameters sent. Awaiting auth state...');
 
     // Await TDLib's acknowledgment (future was set up before tdSend).
-    await authStateFuture;
+    final authEvent = await authStateFuture;
+    if (authEvent is TdError) {
+      throw Exception('TDLib Initialization Error [${authEvent.code}]: ${authEvent.message}');
+    }
     debugPrint('[TdLibClient] Initialization complete!');
   }
 
