@@ -226,6 +226,8 @@ class _AppInner extends ConsumerStatefulWidget {
 class _AppInnerState extends ConsumerState<_AppInner>
     with WidgetsBindingObserver {
   bool _providersReady = false;
+  String? _initError;
+  String? _initStack;
 
   @override
   void initState() {
@@ -235,12 +237,21 @@ class _AppInnerState extends ConsumerState<_AppInner>
   }
 
   Future<void> _initProviders() async {
-    debugPrint('[AppInner] Initializing settings...');
-    await ref.read(settingsControllerProvider.notifier).initialize();
-    debugPrint('[AppInner] Initializing DownloadManager...');
-    await ref.read(downloadManagerProvider).initialize();
-    debugPrint('[AppInner] All providers ready.');
-    if (mounted) setState(() => _providersReady = true);
+    try {
+      debugPrint('[AppInner] Initializing settings...');
+      await ref.read(settingsControllerProvider.notifier).initialize();
+      debugPrint('[AppInner] Initializing DownloadManager...');
+      await ref.read(downloadManagerProvider).initialize();
+      debugPrint('[AppInner] All providers ready.');
+      if (mounted) setState(() => _providersReady = true);
+    } catch (e, st) {
+      if (mounted) {
+        setState(() {
+          _initError = e.toString();
+          _initStack = st.toString();
+        });
+      }
+    }
   }
   
   @override
@@ -272,6 +283,45 @@ class _AppInnerState extends ConsumerState<_AppInner>
 
   @override
   Widget build(BuildContext context) {
+    if (_initError != null) {
+      return MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, size: 48, color: Colors.orange),
+                  const SizedBox(height: 16),
+                  const Text('Failed to load application data', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 200,
+                    child: SingleChildScrollView(
+                      child: Text('$_initError\n\n$_initStack', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _initError = null;
+                        _initStack = null;
+                      });
+                      _initProviders();
+                    },
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     if (!_providersReady) {
       return const MaterialApp(
         home: Scaffold(
