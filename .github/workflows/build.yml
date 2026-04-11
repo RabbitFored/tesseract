@@ -132,12 +132,17 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Setup tdjson.dll from NuGet
-        shell: pwsh
+      - name: Setup Node for tdjson.dll
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup tdjson.dll from npm prebuilt-tdlib
         run: |
-          Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/tdlib.native/1.8.0" -OutFile tdlib.zip
-          Expand-Archive tdlib.zip -DestinationPath tdlib_native
-          Copy-Item "tdlib_native\runtimes\win-x64\native\*.dll" -Destination "build\windows\x64\runner\Release\"
+          npm init -y
+          npm install prebuilt-tdlib@td-1.8.0
+          New-Item -ItemType Directory -Force -Path "build\windows\x64\runner\Release\"
+          Copy-Item "node_modules\prebuilt-tdlib\prebuilds\tdlib-windows-x64\tdjson.dll" -Destination "build\windows\x64\runner\Release\"
       - name: Build Windows release
         run: >
           flutter build windows --release
