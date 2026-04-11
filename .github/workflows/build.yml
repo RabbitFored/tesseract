@@ -140,7 +140,7 @@ jobs:
       - name: Setup tdjson.dll from npm prebuilt-tdlib
         run: |
           npm init -y
-          npm install @prebuilt-tdlib/win32-x64@td-1.8.50
+          npm install @prebuilt-tdlib/win32-x64@0.1008050.0 --force
           New-Item -ItemType Directory -Force -Path "build\windows\x64\runner\Release\"
           Copy-Item "node_modules\@prebuilt-tdlib\win32-x64\tdjson.dll" -Destination "build\windows\x64\runner\Release\"
       - name: Build Windows release

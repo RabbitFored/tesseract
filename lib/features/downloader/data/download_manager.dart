@@ -388,14 +388,9 @@ class DownloadManager {
     if (_resourceMonitor.isPausedByResource) return;
 
     // Cancel any stale TDLib state for this file.
-    // These may error if the file was already cancelled/deleted (expected after crash).
+    // send() returns a TdError if it fails, it does not throw.
     final send = _ref.read(tdlibSendProvider);
-    try {
-      await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
-    } catch (_) {}
-    try {
-      await send(DeleteFile(fileId: fileId));
-    } catch (_) {}
+    await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
 
     // Reset progress, error state, and re-queue.
     await _db.resetForRetry(fileId);
