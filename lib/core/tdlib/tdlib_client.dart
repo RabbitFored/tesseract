@@ -106,26 +106,28 @@ class TdLibClient {
       'API_HASH=${AppConstants.telegramApiHash.isEmpty ? "(EMPTY)" : "(set)"}',
     );
 
+    final params = {
+      'use_test_dc': false,
+      'database_directory': tdlibDir,
+      'files_directory': '$tdlibDir/files',
+      'database_encryption_key': '',
+      'use_file_database': true,
+      'use_chat_info_database': true,
+      'use_message_database': true,
+      'use_secret_chats': false,
+      'api_id': AppConstants.telegramApiId,
+      'api_hash': AppConstants.telegramApiHash,
+      'system_language_code': 'en',
+      'device_model': Platform.operatingSystem,
+      'system_version': Platform.operatingSystemVersion,
+      'application_version': AppConstants.appVersion,
+      'enable_storage_optimizer': true,
+      'ignore_file_names': false,
+    };
+
     tdSend(
       _clientId,
-      SetTdlibParameters(
-        useTestDc: false,
-        databaseDirectory: tdlibDir,
-        filesDirectory: '$tdlibDir/files',
-        databaseEncryptionKey: '',
-        useFileDatabase: true,
-        useChatInfoDatabase: true,
-        useMessageDatabase: true,
-        useSecretChats: false,
-        apiId: AppConstants.telegramApiId,
-        apiHash: AppConstants.telegramApiHash,
-        systemLanguageCode: 'en',
-        deviceModel: Platform.operatingSystem,
-        systemVersion: Platform.operatingSystemVersion,
-        applicationVersion: AppConstants.appVersion,
-        enableStorageOptimizer: true,
-        ignoreFileNames: false,
-      ),
+      _DualFormatTdlibParameters(params),
     );
     debugPrint('[TdLibClient] SetTdlibParameters sent. Awaiting auth state...');
 
@@ -236,4 +238,25 @@ class TdLibClient {
       debugPrint('[TdLibClient] Closed native client id=$id');
     }
   }
+}
+
+class _DualFormatTdlibParameters extends TdFunction {
+  final Map<String, dynamic> params;
+  _DualFormatTdlibParameters(this.params);
+
+  @override
+  Map<String, dynamic> toJson([dynamic extra]) {
+    // Older TDLib requires all parameters wrapped in a "parameters" object.
+    // Newer TDLib >= 1.8.0 requires them flattened on the root.
+    // We send BOTH to safely cross ABI breaks between the Dart generator and C binaries.
+    return {
+      "@type": "setTdlibParameters",
+      "@extra": extra,
+      "parameters": {"@type": "tdlibParameters", ...params},
+      ...params,
+    };
+  }
+
+  @override
+  String getConstructor() => "setTdlibParameters";
 }
