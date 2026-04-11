@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -153,13 +154,29 @@ class TdLibClient {
   void _pollReceive() {
     if (_clientId == 0) return;
 
-    // Drain all queued events in one tick. Without this loop,
-    // only one event is processed per 50ms — if TDLib generates
-    // 50+ UpdateFile events/second during downloads, responses to
-    // new send() calls get buried behind a growing backlog.
     while (true) {
-      final result = tdReceive(0);
-      if (result == null) break;
+      final rawResponse = TdPlugin.instance.tdReceive(0);
+      if (rawResponse == null) break;
+
+      final Map<String, dynamic> jsonMap = jsonDecode(rawResponse);
+      final rawType = jsonMap['@type'];
+
+      if (rawType == 'updateAuthorizationState') {
+        final authState = jsonMap['authorization_state'];
+        if (authState != null) {
+          final authStateType = authState['@type'];
+          // Intercept the WaitEncryptionKey state which is missing from the 1.6 SDK schema.
+          if (authStateType == 'authorizationStateWaitEncryptionKey') {
+            debugPrint('[TdLibClient] Intercepted WaitEncryptionKey (schema bypass). Auto-resolving...');
+            // In TDLib > 1.8.0, checkDatabaseEncryptionKey fulfills this stage natively.
+            tdSend(_clientId, const _CheckDatabaseEncryptionKey());
+            continue;
+          }
+        }
+      }
+
+      final result = convertToObject(rawResponse);
+      if (result == null) continue;
 
       // Cache the latest auth state so late subscribers don't miss it.
       if (result is UpdateAuthorizationState) {
@@ -259,4 +276,26 @@ class _DualFormatTdlibParameters extends TdFunction {
 
   @override
   String getConstructor() => 'setTdlibParameters';
+}
+
+/// Automatically fulfills the separate CheckDatabaseEncryptionKey 
+/// barrier introduced in modern TDLib native engines, while remaining
+/// backward compatible with legacy parameter payloads.
+class _CheckDatabaseEncryptionKey extends TdFunction {
+  const _CheckDatabaseEncryptionKey();
+
+  @override
+  Map<String, dynamic> toJson([dynamic extra]) {
+    return {
+      // Newer TDLib expects checkDatabaseEncryptionKey, older sets it via SetDatabaseEncryptionKey.
+      // The native client ignores unregistered keys.
+      '@type': 'checkDatabaseEncryptionKey',
+      '@extra': extra,
+      'encryption_key': '',
+      'key': '', 
+    };
+  }
+
+  @override
+  String getConstructor() => 'checkDatabaseEncryptionKey';
 }
