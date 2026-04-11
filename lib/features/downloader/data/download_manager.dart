@@ -390,6 +390,7 @@ class DownloadManager {
     // Cancel any stale TDLib state for this file.
     final send = _ref.read(tdlibSendProvider);
     await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+    await send(DeleteFile(fileId: fileId)); // Force TDLib to discard broken physical chunk
 
     // Reset progress, error state, and re-queue.
     await _db.resetForRetry(fileId);

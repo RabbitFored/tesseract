@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, exit;
 import 'dart:isolate';
 import 'dart:ui';
 
@@ -259,6 +259,10 @@ class _AppInnerState extends ConsumerState<_AppInner>
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
         manager.onAppBackgrounded();
+        widget.tdClient.destroy();
+        // Force process teardown to release any persistent zombie native TDLib
+        // locks if the background service isolates kept the FlutterEngine alive.
+        exit(0);
       case AppLifecycleState.resumed:
         manager.onAppResumed();
       default:
