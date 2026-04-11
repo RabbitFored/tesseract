@@ -388,14 +388,24 @@ class DownloadManager {
     if (_resourceMonitor.isPausedByResource) return;
 
     // Cancel any stale TDLib state for this file.
+    // These may error if the file was already cancelled/deleted (expected after crash).
     final send = _ref.read(tdlibSendProvider);
-    await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
-    await send(DeleteFile(fileId: fileId)); // Force TDLib to discard broken physical chunk
+    try {
+      await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+    } catch (_) {}
+    try {
+      await send(DeleteFile(fileId: fileId));
+    } catch (_) {}
 
     // Reset progress, error state, and re-queue.
     await _db.resetForRetry(fileId);
     _speed.removeFile(fileId);
     _notifyChange();
+
+    // Give TDLib 200ms to fully flush the deleted file entry from its internal
+    // cache before re-requesting it. Without this, DownloadFile may reference
+    // stale metadata and immediately error out.
+    await Future<void>.delayed(const Duration(milliseconds: 200));
     await _processQueue();
   }
 

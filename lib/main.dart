@@ -268,11 +268,14 @@ class _AppInnerState extends ConsumerState<_AppInner>
     final manager = ref.read(downloadManagerProvider);
     switch (state) {
       case AppLifecycleState.paused:
+        // App backgrounded (Home button) — keep TDLib alive so downloads
+        // continue. Only start the foreground service notification.
+        manager.onAppBackgrounded();
       case AppLifecycleState.detached:
+        // App swipe-removed from recents — kill the process to release
+        // zombie native TDLib database locks (Bug 5 fix).
         manager.onAppBackgrounded();
         widget.tdClient.destroy();
-        // Force process teardown to release any persistent zombie native TDLib
-        // locks if the background service isolates kept the FlutterEngine alive.
         exit(0);
       case AppLifecycleState.resumed:
         manager.onAppResumed();
