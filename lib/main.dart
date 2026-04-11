@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:isolate';
 import 'dart:ui';
 
@@ -18,7 +19,9 @@ const String kBackgroundPortName = 'tg_downloader_bg_port';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppConstants.initialize();
-  _registerMainPort();
+  if (Platform.isAndroid || Platform.isIOS) {
+    _registerMainPort();
+  }
 
   // runApp immediately — all heavy init happens inside the widget tree.
   runApp(
@@ -120,7 +123,6 @@ class _AppBootstrapState extends State<_AppBootstrap> {
   }
 } catch (e, st) {
       debugPrint('[Bootstrap] Error: $e\n$st');
-      if (mounted) setState(() => _initError = '$e\n\n$st');  // <-- add st here
       if (mounted) {
         setState(() {
           _initError = e;
@@ -244,6 +246,8 @@ class _AppInnerState extends ConsumerState<_AppInner>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Properly close TDLib native client to release DB lock (Bug 5 fix).
+    widget.tdClient.destroy();
     super.dispose();
   }
 

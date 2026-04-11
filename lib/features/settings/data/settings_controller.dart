@@ -1,4 +1,7 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter_riverpod/legacy.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/utils/logger.dart';
@@ -30,9 +33,9 @@ class SettingsController extends StateNotifier<SettingsState> {
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
 
-    // Default to the public Android Downloads folder so files can be shared
-    final basePath = _prefs?.getString('custom_download_path') ?? 
-        '/storage/emulated/0/Download/Tesseract';
+    // Resolve platform-appropriate default download path.
+    final basePath = _prefs?.getString('custom_download_path') ??
+        await _resolveDefaultDownloadPath();
 
     state = SettingsState(
       concurrentDownloads:
@@ -98,5 +101,20 @@ class SettingsController extends StateNotifier<SettingsState> {
   Future<void> setDownloadPath(String path) async {
     await _prefs?.setString('custom_download_path', path);
     state = state.copyWith(downloadBasePath: path);
+  }
+
+  /// Returns a platform-appropriate default download directory.
+  static Future<String> _resolveDefaultDownloadPath() async {
+    if (Platform.isAndroid) {
+      return '/storage/emulated/0/Download/Tesseract';
+    }
+    // Windows, macOS, Linux — use the system Downloads directory.
+    try {
+      final dir = await getDownloadsDirectory();
+      if (dir != null) return '${dir.path}/Tesseract';
+    } catch (_) {}
+    // Fallback to app documents directory.
+    final appDir = await getApplicationDocumentsDirectory();
+    return '${appDir.path}/Tesseract';
   }
 }

@@ -230,6 +230,21 @@ class DownloadDb {
     return db.delete(_table, where: 'file_id = ?', whereArgs: [fileId]);
   }
 
+  /// Bug 3 fix: Reset a failed download for retry — clears progress and error.
+  Future<int> resetForRetry(int fileId) async {
+    final db = await database;
+    return db.update(
+      _table,
+      {
+        'downloaded_size': 0,
+        'status': DownloadStatus.queued.name,
+        'error_reason': '',
+      },
+      where: 'file_id = ?',
+      whereArgs: [fileId],
+    );
+  }
+
   /// Reset all "downloading" items back to "queued" (crash recovery).
   Future<int> resetStaleDownloads() async {
     final db = await database;

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:isolate';
 import 'dart:ui';
 
@@ -31,6 +32,9 @@ class BackgroundDownloadService {
 
   /// Configure the service. Call once from [main] before [runApp].
   static Future<void> initialize() async {
+    // Background service is only supported on Android/iOS.
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+
     await _service.configure(
       iosConfiguration: IosConfiguration(
         autoStart: false,
@@ -52,6 +56,7 @@ class BackgroundDownloadService {
 
   /// Start the keep-alive service. Call when downloads begin.
   static Future<void> start() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
     final running = await _service.isRunning();
     if (!running) {
       await _service.startService();
@@ -61,12 +66,16 @@ class BackgroundDownloadService {
 
   /// Stop the keep-alive service. Call when all downloads finish.
   static Future<void> stop() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
     _service.invoke('stop');
     Log.info('Background service stopped', tag: 'BG_SVC');
   }
 
   /// Whether the service is currently running.
-  static Future<bool> get isRunning => _service.isRunning();
+  static Future<bool> get isRunning async {
+    if (!Platform.isAndroid && !Platform.isIOS) return false;
+    return _service.isRunning();
+  }
 
   /// Push download progress from the MAIN isolate to the background
   /// isolate's notification via [IsolateNameServer].
@@ -75,6 +84,7 @@ class BackgroundDownloadService {
     required int totalCount,
     required double overallProgress,
   }) {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
     final bgPort = IsolateNameServer.lookupPortByName(kBackgroundPortName);
     if (bgPort == null) return;
 

@@ -109,3 +109,57 @@ jobs:
         with:
           files: build/app/outputs/flutter-apk/*arm64*.apk
           generate_release_notes: true
+
+  build-windows:
+    name: Build Release Windows (x64)
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Enable Windows Desktop Support
+        run: flutter config --enable-windows-desktop
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      # Optional: Depending on the tdlib dart package implementation, you may need to download
+      # tdjson.dll and place it next to the compiled executable. We add a placeholder here.
+      # - name: Setup tdjson.dll
+      #   run: |
+      #     Invoke-WebRequest -Uri "https://github.com/tdlib/td/releases/download/.../tdlib.zip" -OutFile tdlib.zip
+      #     Expand-Archive tdlib.zip -DestinationPath tdlib
+      #     Copy-Item tdlib/tdjson.dll build/windows/x64/runner/Release/
+
+      - name: Build Windows release
+        run: >
+          flutter build windows --release
+          --dart-define=TELEGRAM_API_ID=${{ secrets.TELEGRAM_API_ID }}
+          --dart-define=TELEGRAM_API_HASH=${{ secrets.TELEGRAM_API_HASH }}
+
+      - name: Compress Windows Build
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath tesseract-windows-x64.zip
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tesseract-windows-x64
+          path: tesseract-windows-x64.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Create GitHub Release for Windows
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: tesseract-windows-x64.zip
+          generate_release_notes: true

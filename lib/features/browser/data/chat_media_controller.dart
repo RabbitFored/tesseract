@@ -427,7 +427,7 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       // A short batch means TDLib has no more history, but for topics it might
       // just be a small locally populated chunk. Be conservative and only
       // mark exhausted if we got strictly 0 messages.
-      if (msgs.length == 0) {
+      if (msgs.isEmpty) {
         definitivelyExhausted = true;
         break;
       }

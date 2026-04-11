@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -58,7 +59,12 @@ class TdLibClient {
     debugPrint('[TdLibClient] Registering FFI plugin...');
     // Register FFI plugin before anything else
     td_real.TdNativePlugin.registerWith();
-    await td_plugin.TdPlugin.initialize('libtdjson.so');
+    final libName = Platform.isWindows
+        ? 'tdjson.dll'
+        : Platform.isMacOS
+            ? 'libtdjson.dylib'
+            : 'libtdjson.so';
+    await td_plugin.TdPlugin.initialize(libName);
     debugPrint('[TdLibClient] FFI plugin ready.');
 
     _clientId = tdCreate();
@@ -114,8 +120,8 @@ class TdLibClient {
         apiId: AppConstants.telegramApiId,
         apiHash: AppConstants.telegramApiHash,
         systemLanguageCode: 'en',
-        deviceModel: 'Android',
-        systemVersion: '14',
+        deviceModel: Platform.operatingSystem,
+        systemVersion: Platform.operatingSystemVersion,
         applicationVersion: AppConstants.appVersion,
         enableStorageOptimizer: true,
         ignoreFileNames: false,
@@ -188,7 +194,43 @@ class TdLibClient {
   void dispose() {
     _receiveTimer?.cancel();
     _receiveTimer = null;
-    _clientId = 0;
     _updateController.close();
+  }
+
+  /// Properly shut down TDLib: send Close(), wait for AuthorizationStateClosed,
+  /// then destroy the native client. This releases the database lock so the
+  /// next app launch doesn't get stuck on "Connecting to Telegram..." (Bug 5).
+  Future<void> destroy() async {
+    if (_clientId == 0) return;
+
+    try {
+      // Send the Close command to TDLib.
+      tdSend(_clientId, const Close());
+
+      // Wait (up to 5 seconds) for TDLib to acknowledge the close.
+      await updates
+          .where((e) =>
+              e is UpdateAuthorizationState &&
+              e.authorizationState is AuthorizationStateClosed)
+          .first
+          .timeout(const Duration(seconds: 5), onTimeout: () {
+        debugPrint('[TdLibClient] Timeout waiting for AuthorizationStateClosed');
+        return const UpdateAuthorizationState(
+          authorizationState: AuthorizationStateClosed(),
+        );
+      });
+    } catch (e) {
+      debugPrint('[TdLibClient] Error during destroy: $e');
+    } finally {
+      _receiveTimer?.cancel();
+      _receiveTimer = null;
+      final id = _clientId;
+      _clientId = 0;
+      if (!_updateController.isClosed) {
+        _updateController.close();
+      }
+      // The native client handle is freed internally or not explicitly exposed.
+      debugPrint('[TdLibClient] Closed native client id=$id');
+    }
   }
 }

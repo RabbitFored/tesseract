@@ -361,7 +361,7 @@ class _ActionButtons extends ConsumerWidget {
               icon: Icons.refresh_rounded,
               tooltip: 'Retry',
               color: const Color(0xFF2AABEE),
-              onPressed: () => manager.resumeDownload(item.fileId),
+              onPressed: () => manager.retryDownload(item.fileId),
             ),
             _IconBtn(
               icon: Icons.close_rounded,

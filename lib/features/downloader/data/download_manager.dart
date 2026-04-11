@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' as io;
+import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -41,6 +42,7 @@ class DownloadManager {
   late final ResourceMonitor _resourceMonitor;
   StreamSubscription<TdObject>? _tdlibSub;
   bool _initialized = false;
+  bool _disposed = false;
 
   final _queueChanged = StreamController<void>.broadcast();
   Stream<void> get onQueueChanged => _queueChanged.stream;
@@ -57,6 +59,11 @@ class DownloadManager {
   Future<void> initialize() async {
     if (_initialized) return;
     _initialized = true;
+
+    // Bug 1 fix: Request storage permissions upfront on Android.
+    if (Platform.isAndroid) {
+      await _ensureStoragePermissions();
+    }
 
     await _db.database;
     await _db.resetStaleDownloads();
@@ -75,11 +82,24 @@ class DownloadManager {
   }
 
   void dispose() {
+    _disposed = true;
     _tdlibSub?.cancel();
     _queueChanged.close();
     _speed.dispose();
     _resourceMonitor.dispose();
     _db.close();
+  }
+
+  /// Bug 1 fix: Request storage permissions at app startup on Android.
+  Future<void> _ensureStoragePermissions() async {
+    if (!await Permission.storage.isGranted) {
+      final result = await Permission.storage.request();
+      Log.info('Storage permission: $result', tag: 'DL_MGR');
+    }
+    if (!await Permission.manageExternalStorage.isGranted) {
+      final result = await Permission.manageExternalStorage.request();
+      Log.info('Manage storage permission: $result', tag: 'DL_MGR');
+    }
   }
 
   // ── Resource constraint callbacks ────────────────────────────
@@ -102,6 +122,7 @@ class DownloadManager {
   // ── App lifecycle hooks ──────────────────────────────────────
 
   Future<void> onAppBackgrounded() async {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
     final active = await _db.activeCount();
     if (active > 0) {
       await BackgroundDownloadService.start();
@@ -114,7 +135,7 @@ class DownloadManager {
     _resourceMonitor.recheck();
     final active = await _db.activeCount();
     final queued = (await _db.getByStatus(DownloadStatus.queued)).length;
-    if (active == 0 && queued == 0) {
+    if (active == 0 && queued == 0 && (Platform.isAndroid || Platform.isIOS)) {
       await BackgroundDownloadService.stop();
     }
   }
@@ -337,8 +358,10 @@ class DownloadManager {
 
     _handleTdlibResult(fileId, result);
 
-    await BackgroundDownloadService.start();
-    _pushProgressToService();
+    if (Platform.isAndroid || Platform.isIOS) {
+      await BackgroundDownloadService.start();
+      _pushProgressToService();
+    }
   }
 
   Future<void> pauseDownload(int fileId) async {
@@ -354,6 +377,23 @@ class DownloadManager {
   Future<void> resumeDownload(int fileId) async {
     if (_resourceMonitor.isPausedByResource) return;
     await _db.updateStatus(fileId, DownloadStatus.queued);
+    _notifyChange();
+    await _processQueue();
+  }
+
+  /// Bug 3 fix: Dedicated retry method that fully resets download state.
+  /// Unlike resumeDownload(), this clears downloaded progress and error state
+  /// so TDLib starts fresh instead of trying to resume a corrupted partial.
+  Future<void> retryDownload(int fileId) async {
+    if (_resourceMonitor.isPausedByResource) return;
+
+    // Cancel any stale TDLib state for this file.
+    final send = _ref.read(tdlibSendProvider);
+    await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+
+    // Reset progress, error state, and re-queue.
+    await _db.resetForRetry(fileId);
+    _speed.removeFile(fileId);
     _notifyChange();
     await _processQueue();
   }
@@ -447,15 +487,15 @@ class DownloadManager {
     }
 
     try {
-      // Best-effort permission request before copying.
-      // On some Android versions, these aren't strictly required for the Downloads
-      // directory, so we don't return null if they return denied. We just try the
-      // file copy operation and let the standard catch block handle genuine IO exceptions.
-      if (!await Permission.storage.isGranted) {
-        await Permission.storage.request();
-      }
-      if (!await Permission.manageExternalStorage.isGranted) {
-        await Permission.manageExternalStorage.request();
+      // Best-effort permission request before copying (safety net — Bug 1
+      // fix ensures these are already granted at startup on Android).
+      if (Platform.isAndroid) {
+        if (!await Permission.storage.isGranted) {
+          await Permission.storage.request();
+        }
+        if (!await Permission.manageExternalStorage.isGranted) {
+          await Permission.manageExternalStorage.request();
+        }
       }
 
       // Read the CURRENT download path from settings state (not stale).
@@ -484,8 +524,10 @@ class DownloadManager {
       Log.info('Exported: ${item.fileName} → $targetPath', tag: 'DL_MGR');
 
       try {
-        const platform = MethodChannel('tesseract/media_scanner');
-        await platform.invokeMethod('scanFile', {'path': targetPath});
+        if (Platform.isAndroid) {
+          const platform = MethodChannel('tesseract/media_scanner');
+          await platform.invokeMethod('scanFile', {'path': targetPath});
+        }
       } catch (e) {
         Log.error('Failed to trigger media scan for $targetPath: $e', tag: 'DL_MGR');
       }
@@ -589,7 +631,7 @@ class DownloadManager {
   }
 
   void _notifyChange() {
-    if (!_queueChanged.isClosed) {
+    if (!_disposed && !_queueChanged.isClosed) {
       _queueChanged.add(null);
     }
   }
