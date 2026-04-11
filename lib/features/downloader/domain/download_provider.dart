@@ -2,18 +2,12 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/download_db.dart';
 import '../data/download_manager.dart';
 import '../domain/download_item.dart';
 import '../domain/download_status.dart';
 
 // ── Database provider (singleton) ──────────────────────────────
-
-final downloadDbProvider = Provider<DownloadDb>((ref) {
-  final db = DownloadDb();
-  ref.onDispose(() => db.close());
-  return db;
-});
+// (Removed duplicate instances of DownloadDb)
 
 // ── Live queue stream ──────────────────────────────────────────
 

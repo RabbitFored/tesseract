@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:tdlib/td_api.dart';
 
 import '../../../core/tdlib/tdlib_client.dart';
@@ -11,27 +10,31 @@ import '../domain/auth_state.dart';
 
 /// Global provider for the auth controller.
 final authControllerProvider =
-    StateNotifierProvider<AuthController, AuthFlowState>(
-  (ref) => AuthController(ref),
+    NotifierProvider<AuthController, AuthFlowState>(
+  AuthController.new,
 );
 
 /// Manages the Telegram authentication lifecycle by listening to TDLib
 /// authorization-state updates and exposing a reactive [AuthFlowState].
-class AuthController extends StateNotifier<AuthFlowState> {
-  AuthController(this._ref) : super(const AuthLoading()) {
-    _subscribe();
-  }
-
-  final Ref _ref;
+class AuthController extends Notifier<AuthFlowState> {
   StreamSubscription<TdObject>? _sub;
 
   // Track the last "clean" auth step so we can return to it after errors.
   AuthFlowState _lastCleanState = const AuthLoading();
 
+  @override
+  AuthFlowState build() {
+    _subscribe();
+    ref.onDispose(() {
+      _sub?.cancel();
+    });
+    return const AuthLoading();
+  }
+
   // ── Lifecycle ────────────────────────────────────────────────
 
   void _subscribe() {
-    final client = _ref.read(tdlibClientProvider);
+    final client = ref.read(tdlibClientProvider);
     _sub = client.updates.listen(_onUpdate);
 
     // If TDLib already sent AuthorizationStateReady during bootstrap
@@ -41,12 +44,6 @@ class AuthController extends StateNotifier<AuthFlowState> {
     if (cached != null) {
       _handleAuthState(cached);
     }
-  }
-
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
   }
 
   // ── TDLib update handler ─────────────────────────────────────
@@ -92,7 +89,7 @@ class AuthController extends StateNotifier<AuthFlowState> {
 
   /// Submit the user's phone number to TDLib.
   Future<void> submitPhoneNumber(String phoneNumber) async {
-    final send = _ref.read(tdlibSendProvider);
+    final send = ref.read(tdlibSendProvider);
     final result = await send(SetAuthenticationPhoneNumber(
       phoneNumber: phoneNumber,
       settings: null,
@@ -102,14 +99,14 @@ class AuthController extends StateNotifier<AuthFlowState> {
 
   /// Submit the OTP code received via SMS / Telegram.
   Future<void> submitCode(String code) async {
-    final send = _ref.read(tdlibSendProvider);
+    final send = ref.read(tdlibSendProvider);
     final result = await send(CheckAuthenticationCode(code: code));
     _handleResult(result);
   }
 
   /// Submit the 2FA cloud password.
   Future<void> submitPassword(String password) async {
-    final send = _ref.read(tdlibSendProvider);
+    final send = ref.read(tdlibSendProvider);
     final result = await send(CheckAuthenticationPassword(password: password));
     _handleResult(result);
   }

@@ -1,6 +1,6 @@
 import 'dart:io' show Platform;
 
-import 'package:flutter_riverpod/legacy.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -19,15 +19,16 @@ abstract final class _Keys {
 
 /// Global settings provider.
 final settingsControllerProvider =
-    StateNotifierProvider<SettingsController, SettingsState>(
-  (ref) => SettingsController(),
+    NotifierProvider<SettingsController, SettingsState>(
+  SettingsController.new,
 );
 
 /// Manages user preferences via [SharedPreferences].
-class SettingsController extends StateNotifier<SettingsState> {
-  SettingsController() : super(const SettingsState());
-
+class SettingsController extends Notifier<SettingsState> {
   SharedPreferences? _prefs;
+
+  @override
+  SettingsState build() => const SettingsState();
 
   /// Load persisted settings. Call once at app start.
   Future<void> initialize() async {
