@@ -24,59 +24,53 @@ class AuthController extends Notifier<AuthFlowState> {
 
   @override
   AuthFlowState build() {
-    _subscribe();
-    ref.onDispose(() {
-      _sub?.cancel();
-    });
-    return const AuthLoading();
-  }
-
-  // ── Lifecycle ────────────────────────────────────────────────
-
-  void _subscribe() {
     final client = ref.read(tdlibClientProvider);
     _sub = client.updates.listen(_onUpdate);
 
-    // If TDLib already sent AuthorizationStateReady during bootstrap
-    // (before this controller existed), the broadcast stream event is
-    // gone. Check the cached auth state from TdLibClient instead.
+    ref.onDispose(() {
+      _sub?.cancel();
+    });
+
     final cached = client.lastAuthState;
     if (cached != null) {
-      _handleAuthState(cached);
+      return _mapAuthStateToFlow(cached);
     }
+    
+    return const AuthLoading();
   }
 
   // ── TDLib update handler ─────────────────────────────────────
 
   void _onUpdate(TdObject event) {
     if (event is UpdateAuthorizationState) {
-      _handleAuthState(event.authorizationState);
+      final next = _mapAuthStateToFlow(event.authorizationState);
+      _setState(next);
     }
   }
 
-  void _handleAuthState(AuthorizationState authState) {
+  AuthFlowState _mapAuthStateToFlow(AuthorizationState authState) {
     Log.tdlib('Auth state → ${authState.runtimeType}');
 
     switch (authState) {
       case AuthorizationStateWaitPhoneNumber():
-        _setState(const AuthWaitPhoneNumber());
+        return const AuthWaitPhoneNumber();
 
       case AuthorizationStateWaitCode(codeInfo: final info):
-        _setState(AuthWaitCode(
+        return AuthWaitCode(
           phoneNumber: info.phoneNumber,
           codeLength: _codeLength(info.type),
           codeType: _describeCodeType(info.type),
-        ));
+        );
 
       case AuthorizationStateWaitPassword(passwordHint: final hint):
-        _setState(AuthWaitPassword(passwordHint: hint));
+        return AuthWaitPassword(passwordHint: hint);
 
       case AuthorizationStateReady():
-        _setState(const AuthReady());
+        return const AuthReady();
 
       default:
-        // Other states (Closing, Closed, WaitTdlibParameters, etc.)
         Log.tdlib('Unhandled auth state: ${authState.runtimeType}');
+        return state; // Retain current state if unhandled
     }
   }
 
