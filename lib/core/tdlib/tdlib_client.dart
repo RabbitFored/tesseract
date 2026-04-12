@@ -335,15 +335,44 @@ class TdLibClient {
   static void _normalizeStructure(Map<String, dynamic> json) {
     final type = json['@type'];
 
-    // messageInteractionInfo.reactions: 1.8.x wraps in {"@type":"messageReactions","reactions":[...]}
+    // messageInteractionInfo.reactions: 1.8.x wraps in {"@type":"messageReactions",...}
     // but 1.6.0 expects a plain List<MessageReaction>.
     if (type == 'messageInteractionInfo') {
       final reactions = json['reactions'];
       if (reactions is Map<String, dynamic> && reactions['@type'] != null) {
-        // Unwrap: extract the inner list from the typed wrapper.
         json['reactions'] = reactions['reactions'] ?? [];
       } else if (reactions is! List) {
         json['reactions'] = [];
+      }
+    }
+
+    // emojiStatus: 1.8.x has {"type":{"@type":"emojiStatusTypeCustomEmoji","custom_emoji_id":"..."}}
+    // but 1.6.0 expects {"custom_emoji_id": "...", "expiration_date": 0}
+    if (type == 'emojiStatus') {
+      if (json['custom_emoji_id'] == null) {
+        final statusType = json['type'];
+        if (statusType is Map<String, dynamic>) {
+          json['custom_emoji_id'] = statusType['custom_emoji_id'] ?? '0';
+        } else {
+          json['custom_emoji_id'] = '0';
+        }
+      }
+      if (json['expiration_date'] == null) json['expiration_date'] = 0;
+    }
+
+    // messageForwardInfo: 1.8.x removed from_chat_id/from_message_id, moved to "source" object.
+    if (type == 'messageForwardInfo') {
+      final source = json['source'];
+      if (json['from_chat_id'] == null) {
+        json['from_chat_id'] = (source is Map<String, dynamic>) ? (source['chat_id'] ?? 0) : 0;
+      }
+      if (json['from_message_id'] == null) {
+        json['from_message_id'] = (source is Map<String, dynamic>) ? (source['message_id'] ?? 0) : 0;
+      }
+      // 1.8.x uses a typed "origin" but may also use different sub-types.
+      // Ensure origin exists for the fromJson constructor.
+      if (json['origin'] == null) {
+        json['origin'] = {'@type': 'messageForwardOriginHiddenUser', 'sender_name': ''};
       }
     }
   }
