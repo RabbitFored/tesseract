@@ -54,3 +54,8 @@ test_tdlib.dart
 .agents/
 knowledge/
 brain/
+
+# ── Local Windows Build Dependencies ──────────────────────────
+node_modules/
+package.json
+package-lock.json
