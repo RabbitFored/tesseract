@@ -92,11 +92,12 @@ class SettingsController extends Notifier<SettingsState> {
   }
 
   String resolveDownloadPath(String fileName) {
+    final sep = Platform.pathSeparator;
     if (state.smartCategorization) {
       final category = SettingsState.categoryForExtension(fileName);
-      return '${state.downloadBasePath}/$category/$fileName';
+      return '${state.downloadBasePath}$sep$category$sep$fileName';
     }
-    return '${state.downloadBasePath}/$fileName';
+    return '${state.downloadBasePath}$sep$fileName';
   }
 
   Future<void> setDownloadPath(String path) async {
@@ -106,16 +107,17 @@ class SettingsController extends Notifier<SettingsState> {
 
   /// Returns a platform-appropriate default download directory.
   static Future<String> _resolveDefaultDownloadPath() async {
+    final sep = Platform.pathSeparator;
     if (Platform.isAndroid) {
       return '/storage/emulated/0/Download/Tesseract';
     }
     // Windows, macOS, Linux — use the system Downloads directory.
     try {
       final dir = await getDownloadsDirectory();
-      if (dir != null) return '${dir.path}/Tesseract';
+      if (dir != null) return '${dir.path}${sep}Tesseract';
     } catch (_) {}
     // Fallback to app documents directory.
     final appDir = await getApplicationDocumentsDirectory();
-    return '${appDir.path}/Tesseract';
+    return '${appDir.path}${sep}Tesseract';
   }
 }

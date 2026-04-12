@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../auth/data/auth_controller.dart';
 import '../data/settings_controller.dart';
+import '../data/user_profile_provider.dart';
 
 /// Settings screen with concurrent download slider, theme toggle,
 /// and smart categorization toggle.
@@ -27,6 +29,11 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
+          // ── Account section ───────────────────────────────
+          _SectionHeader(title: 'Account', theme: theme),
+          const _AccountCard(),
+          const SizedBox(height: 8),
+
           // ── Download section ──────────────────────────────
           _SectionHeader(title: 'Downloads', theme: theme),
 
@@ -354,6 +361,153 @@ class SettingsScreen extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+class _AccountCard extends ConsumerWidget {
+  const _AccountCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final profileAsync = ref.watch(userProfileProvider);
+
+    return profileAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (err, _) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('Failed to load profile: $err'),
+      ),
+      data: (user) {
+        if (user == null) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('No user loaded.'),
+          );
+        }
+
+        final name = [user.firstName, user.lastName]
+            .where((s) => s.isNotEmpty)
+            .join(' ');
+        final initials = name.isNotEmpty
+            ? name.characters.first.toUpperCase()
+            : '?';
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Column(
+            children: [
+              Card(
+                color: theme.colorScheme.surfaceContainerHigh,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 28,
+                        backgroundColor: const Color(0xFF2AABEE),
+                        child: Text(
+                          initials,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              name,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            if (user.phoneNumber.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                '+${user.phoneNumber}',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 2),
+                            Text(
+                              'ID: ${user.id}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => _confirmLogout(context, ref),
+                icon: const Icon(Icons.logout_rounded),
+                label: const Text('Log Out'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFFF1744),
+                  side: const BorderSide(color: Color(0xFFFF1744)),
+                  minimumSize: const Size.fromHeight(48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    final bool? result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Log out of Telegram?'),
+        content: const Text(
+          'Active downloads will be cancelled. You will need to wait for a code to sign back in.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFFF1744),
+            ),
+            child: const Text('Log Out'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      if (context.mounted) {
+        Navigator.popUntil(context, (route) => route.isFirst);
+      }
+      ref.read(authControllerProvider.notifier).logOut();
+    }
   }
 }
 

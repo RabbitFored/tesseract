@@ -72,8 +72,8 @@ class TdLibClient {
     debugPrint('[TdLibClient] Created native client id=$_clientId');
 
     // Silence the massively verbose C++ internal logging polluting PowerShell/stdout.
-    // Level 1 = Warnings/Errors only. 
-    tdExecute(const SetLogVerbosityLevel(newVerbosityLevel: 1));
+    // Level 2 = Warnings/Errors/Info. 
+    tdExecute(const SetLogVerbosityLevel(newVerbosityLevel: 2));
 
     // Start the receive loop BEFORE sending any request, so we never
     // miss an event that arrives between tdSend() and the await below.
@@ -179,7 +179,28 @@ class TdLibClient {
         }
       }
 
-      final result = convertToObject(rawResponse);
+      // Patch JSON for TDLib 1.6.0 dart ↔ 1.8.x binary schema mismatches.
+      _polyfillTdlibSchema(jsonMap);
+      final patchedResponse = jsonEncode(jsonMap);
+
+      TdObject? result;
+      try {
+        result = convertToObject(patchedResponse);
+      } catch (e, st) {
+        debugPrint('[TdLibClient] Failed to parse response: $e');
+        debugPrint('[TdLibClient] Stack: ${st.toString().split('\n').take(3).join('\n')}');
+        // If this was a response to a send() call, emit TdError so the
+        // completer resolves instead of hanging for 30s.
+        final extra = jsonMap['@extra'];
+        if (extra != null && !_updateController.isClosed) {
+          _updateController.add(TdError(
+            code: 500,
+            message: 'Schema parse error: $e',
+            extra: extra,
+          ));
+        }
+        continue;
+      }
       if (result == null) continue;
 
       // Cache the latest auth state so late subscribers don't miss it.
@@ -258,6 +279,243 @@ class TdLibClient {
       // The native client handle is freed internally or not explicitly exposed.
       debugPrint('[TdLibClient] Closed native client id=$id');
     }
+  }
+
+  /// Comprehensive polyfill for TDLib 1.6.0 Dart schema ↔ 1.8.x binary mismatches.
+  ///
+  /// Three-step process applied recursively:
+  /// 1. Apply field aliases for keys renamed between versions
+  /// 2. Inject missing keys that fromJson expects but the binary omits
+  /// 3. Patch remaining nulls by naming convention
+  void _polyfillTdlibSchema(dynamic json) {
+    if (json is Map<String, dynamic>) {
+      if (json.containsKey('@type')) {
+        _applyFieldAliases(json);
+        _injectMissingKeys(json);
+        _normalizeStructure(json);
+        // Patch any remaining null values by naming convention.
+        for (final key in json.keys.toList()) {
+          if (json[key] != null || key.startsWith('@')) continue;
+          if (_isBoolKey(key))        json[key] = false;
+          else if (_isIntKey(key))    json[key] = 0;
+          else if (_isStringKey(key)) json[key] = '';
+        }
+      }
+      for (final value in json.values) {
+        _polyfillTdlibSchema(value);
+      }
+    } else if (json is List) {
+      for (final item in json) {
+        _polyfillTdlibSchema(item);
+      }
+    }
+  }
+
+  // ── Field aliases: binary key → dart schema key ──
+
+  static const _fieldAliases = <String, String>{
+    'can_add_link_previews': 'can_add_web_page_previews',
+    'show_story_poster': 'show_story_sender',
+    'use_default_show_story_poster': 'use_default_show_story_sender',
+    'can_create_topics': 'can_manage_topics',
+  };
+
+  static void _applyFieldAliases(Map<String, dynamic> json) {
+    for (final e in _fieldAliases.entries) {
+      if (json.containsKey(e.key) && !json.containsKey(e.value)) {
+        json[e.value] = json[e.key];
+      }
+    }
+  }
+
+  // ── Structural normalization: handle type changes between versions ──
+
+  /// Some TDLib 1.8.x fields change from plain values to typed wrapper objects.
+  /// This normalizes them back to what the Dart 1.6.0 fromJson expects.
+  static void _normalizeStructure(Map<String, dynamic> json) {
+    final type = json['@type'];
+
+    // messageInteractionInfo.reactions: 1.8.x wraps in {"@type":"messageReactions","reactions":[...]}
+    // but 1.6.0 expects a plain List<MessageReaction>.
+    if (type == 'messageInteractionInfo') {
+      final reactions = json['reactions'];
+      if (reactions is Map<String, dynamic> && reactions['@type'] != null) {
+        // Unwrap: extract the inner list from the typed wrapper.
+        json['reactions'] = reactions['reactions'] ?? [];
+      } else if (reactions is! List) {
+        json['reactions'] = [];
+      }
+    }
+  }
+
+  // ── Missing key injection: add keys that fromJson reads but binary omits ──
+
+  /// Maps @type → list of keys that the Dart 1.6.0 fromJson expects.
+  /// Only lists keys that TDLib 1.8.x is known to omit.
+  static const _requiredKeys = <String, Map<String, dynamic>>{
+    'user': {
+      'is_contact': false, 'is_mutual_contact': false, 'is_close_friend': false,
+      'is_verified': false, 'is_premium': false, 'is_support': false,
+      'is_scam': false, 'is_fake': false, 'has_active_stories': false,
+      'has_unread_active_stories': false, 'have_access': false,
+      'added_to_attachment_menu': false, 'restriction_reason': '',
+    },
+    'userFullInfo': {
+      'is_blocked': false, 'can_be_called': false, 'supports_video_calls': false,
+      'has_private_calls': false, 'has_private_forwards': false,
+      'has_restricted_voice_and_video_note_messages': false,
+      'has_pinned_stories': false, 'need_phone_number_privacy_exception': false,
+    },
+    'supergroup': {
+      'has_linked_chat': false, 'has_location': false, 'sign_messages': false,
+      'join_to_send_messages': false, 'join_by_request': false,
+      'is_slow_mode_enabled': false, 'is_channel': false, 'is_broadcast_group': false,
+      'is_forum': false, 'is_verified': false, 'is_scam': false, 'is_fake': false,
+      'restriction_reason': '',
+    },
+    'supergroupFullInfo': {
+      'is_all_history_available': false, 'has_hidden_members': false,
+      'can_hide_members': false, 'has_aggressive_anti_spam_enabled': false,
+      'can_toggle_aggressive_anti_spam': false,
+    },
+    'basicGroup': {
+      'is_active': false,
+    },
+    'basicGroupFullInfo': {
+      'can_hide_members': false, 'can_toggle_aggressive_anti_spam': false,
+    },
+    'chat': {
+      'has_protected_content': false, 'is_translatable': false,
+      'is_marked_as_unread': false, 'is_blocked': false,
+      'has_scheduled_messages': false, 'can_be_deleted_only_for_self': false,
+      'can_be_deleted_for_all_users': false, 'can_be_reported': false,
+      'default_disable_notification': false,
+    },
+    'chatPermissions': {
+      'can_send_basic_messages': false, 'can_send_audios': false,
+      'can_send_documents': false, 'can_send_photos': false,
+      'can_send_videos': false, 'can_send_video_notes': false,
+      'can_send_voice_notes': false, 'can_send_polls': false,
+      'can_send_other_messages': false, 'can_add_web_page_previews': false,
+      'can_change_info': false, 'can_invite_users': false,
+      'can_pin_messages': false, 'can_manage_topics': false,
+    },
+    'chatNotificationSettings': {
+      'use_default_mute_for': false, 'use_default_sound': false,
+      'use_default_show_preview': false, 'show_preview': false,
+      'use_default_mute_stories': false, 'mute_stories': false,
+      'use_default_story_sound': false, 'use_default_show_story_sender': false,
+      'show_story_sender': false,
+      'use_default_disable_pinned_message_notifications': false,
+      'disable_pinned_message_notifications': false,
+      'use_default_disable_mention_notifications': false,
+      'disable_mention_notifications': false,
+    },
+    'message': {
+      'is_outgoing': false, 'is_pinned': false, 'can_be_edited': false,
+      'can_be_forwarded': false, 'can_be_saved': false,
+      'can_be_deleted_only_for_self': false, 'can_be_deleted_for_all_users': false,
+      'can_get_added_reactions': false, 'can_get_statistics': false,
+      'can_get_message_thread': false, 'can_get_viewers': false,
+      'can_get_media_timestamp_links': false, 'can_report_reactions': false,
+      'has_timestamped_media': false, 'is_channel_post': false,
+      'is_topic_message': false, 'contains_unread_mention': false,
+      'restriction_reason': '', 'author_signature': '',
+    },
+    'chatFolderInfo': {
+      'title': '', 'is_shareable': false, 'has_my_invite_links': false,
+    },
+    'chatAdministratorRights': {
+      'is_anonymous': false, 'can_manage_chat': false,
+      'can_change_info': false, 'can_post_messages': false,
+      'can_edit_messages': false, 'can_delete_messages': false,
+      'can_invite_users': false, 'can_restrict_members': false,
+      'can_pin_messages': false, 'can_manage_topics': false,
+      'can_promote_members': false, 'can_manage_video_chats': false,
+    },
+    'chatInviteLink': {
+      'is_primary': false, 'is_revoked': false,
+      'creates_join_request': false,
+    },
+    'profilePhoto': {
+      'has_animation': false, 'is_personal': false,
+    },
+    'chatPhoto': {
+      'has_animation': false,
+    },
+    'messageForwardInfo': {
+      'public_service_announcement_type': '',
+    },
+    'forwardSource': {
+      'sender_name': '',
+    },
+    'videoChat': {
+      'has_participants': false,
+    },
+    'linkPreviewOptions': {
+      'is_disabled': false, 'force_small_media': false,
+      'force_large_media': false, 'show_above_text': false,
+    },
+    'messagePhoto': {
+      'show_caption_above_media': false, 'has_spoiler': false, 'is_secret': false,
+    },
+    'messageVideo': {
+      'show_caption_above_media': false, 'has_spoiler': false, 'is_secret': false,
+    },
+    'messageAnimation': {
+      'show_caption_above_media': false, 'has_spoiler': false, 'is_secret': false,
+    },
+    'photo': {
+      'has_stickers': false,
+    },
+    'chatMemberStatusCreator': {
+      'is_anonymous': false, 'is_member': false,
+    },
+    'chatMemberStatusAdministrator': {
+      'can_be_edited': false,
+    },
+    'chatMemberStatusRestricted': {
+      'is_member': false,
+    },
+  };
+
+  static void _injectMissingKeys(Map<String, dynamic> json) {
+    final type = json['@type'] as String?;
+    if (type == null) return;
+    final defaults = _requiredKeys[type];
+    if (defaults == null) return;
+    for (final e in defaults.entries) {
+      if (!json.containsKey(e.key)) {
+        json[e.key] = e.value;
+      }
+    }
+  }
+
+  // ── Naming convention fallback for types not in _requiredKeys ──
+
+  static bool _isBoolKey(String key) {
+    return key.startsWith('is_') || key.startsWith('can_') ||
+        key.startsWith('has_') || key.startsWith('have_') ||
+        key.startsWith('need_') || key.startsWith('show_') ||
+        key.startsWith('use_default_') || key.startsWith('disable_') ||
+        key.startsWith('mute_') || key.startsWith('force_') ||
+        key.startsWith('added_to_') || key.startsWith('join_') ||
+        key.startsWith('sign_') || key.startsWith('supports_') ||
+        key.startsWith('contains_') || key.startsWith('default_disable_') ||
+        key.startsWith('set_');
+  }
+
+  static bool _isIntKey(String key) {
+    return key.endsWith('_count') || key.endsWith('_date') ||
+        key.endsWith('_size') || key.endsWith('_time') ||
+        key.endsWith('_offset') || key.endsWith('_level') ||
+        key == 'date' || key == 'edit_date';
+  }
+
+  static bool _isStringKey(String key) {
+    return key == 'restriction_reason' || key == 'author_signature' ||
+        key == 'theme_name' || key == 'client_data' || key == 'title' ||
+        key == 'sender_name' || key == 'public_service_announcement_type';
   }
 }
 

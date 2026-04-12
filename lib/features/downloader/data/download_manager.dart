@@ -367,10 +367,10 @@ class DownloadManager {
 
   Future<void> pauseDownload(int fileId) async {
     final send = _ref.read(tdlibSendProvider);
-    await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
     await _db.updateStatus(fileId, DownloadStatus.paused);
-    _speed.removeFile(fileId);
     _notifyChange();
+    await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
+    _speed.removeFile(fileId);
     _pushProgressToService();
     await _processQueue();
   }

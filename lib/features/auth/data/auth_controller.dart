@@ -105,6 +105,13 @@ class AuthController extends Notifier<AuthFlowState> {
     _handleResult(result);
   }
 
+  /// Log out from the current Telegram account.
+  Future<void> logOut() async {
+    final send = ref.read(tdlibSendProvider);
+    final result = await send(const LogOut());
+    _handleResult(result);
+  }
+
   /// Acknowledge an error and return to the previous input step.
   void clearError() {
     state = _lastCleanState;
