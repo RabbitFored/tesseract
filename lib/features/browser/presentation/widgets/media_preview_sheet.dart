@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:video_player/video_player.dart';
 import 'package:chewie/chewie.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 import '../../../../core/tdlib/tdlib_client.dart';
 import '../../../../core/tdlib/tdlib_provider.dart';
@@ -243,14 +243,25 @@ class _MediaPreviewSheetState extends ConsumerState<MediaPreviewSheet> {
 
     if (type == MediaType.audio || type == MediaType.voiceNote) {
       _audioPlayer = AudioPlayer();
-      await _audioPlayer!.setFilePath(path);
-      _audioDuration = _audioPlayer!.duration ?? Duration.zero;
-      _audioPlayer!.positionStream.listen((pos) {
-        if (mounted) setState(() => _audioPosition = pos);
+
+      // Listen to duration changes.
+      _audioPlayer!.onDurationChanged.listen((d) {
+        if (mounted) setState(() => _audioDuration = d);
       });
-      _audioPlayer!.playingStream.listen((playing) {
-        if (mounted) setState(() => _audioPlaying = playing);
+      // Listen to position changes.
+      _audioPlayer!.onPositionChanged.listen((p) {
+        if (mounted) setState(() => _audioPosition = p);
       });
+      // Listen to player state changes.
+      _audioPlayer!.onPlayerStateChanged.listen((s) {
+        if (mounted) setState(() => _audioPlaying = s == PlayerState.playing);
+      });
+      // Listen for completion — reset position.
+      _audioPlayer!.onPlayerComplete.listen((_) {
+        if (mounted) setState(() => _audioPosition = Duration.zero);
+      });
+
+      await _audioPlayer!.setSourceDeviceFile(path);
       if (mounted) setState(() => _state = _PreviewState.ready);
       return;
     }
@@ -548,8 +559,7 @@ class _AudioPlayer extends StatelessWidget {
           SliderTheme(
             data: SliderTheme.of(context).copyWith(
               trackHeight: 3,
-              thumbShape:
-                  const RoundSliderThumbShape(enabledThumbRadius: 6),
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
             ),
             child: Slider(
               value: progress.clamp(0.0, 1.0),
@@ -581,8 +591,10 @@ class _AudioPlayer extends StatelessWidget {
               IconButton(
                 iconSize: 32,
                 icon: const Icon(Icons.replay_10_rounded),
-                onPressed: () => player.seek(
-                    Duration(seconds: position.inSeconds - 10)),
+                onPressed: () {
+                  final target = position - const Duration(seconds: 10);
+                  player.seek(target < Duration.zero ? Duration.zero : target);
+                },
               ),
               const SizedBox(width: 8),
               Container(
@@ -599,15 +611,17 @@ class _AudioPlayer extends StatelessWidget {
                       ? Icons.pause_rounded
                       : Icons.play_arrow_rounded),
                   onPressed: () =>
-                      isPlaying ? player.pause() : player.play(),
+                      isPlaying ? player.pause() : player.resume(),
                 ),
               ),
               const SizedBox(width: 8),
               IconButton(
                 iconSize: 32,
                 icon: const Icon(Icons.forward_10_rounded),
-                onPressed: () => player.seek(
-                    Duration(seconds: position.inSeconds + 10)),
+                onPressed: () {
+                  final target = position + const Duration(seconds: 10);
+                  player.seek(target > duration ? duration : target);
+                },
               ),
             ],
           ),

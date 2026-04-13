@@ -61,9 +61,8 @@ dependencies:
   video_player: ^2.9.2
   chewie: ^1.8.5
   cached_network_image: ^3.4.1
-  just_audio: ^0.9.42
-  # Windows audio support for just_audio
-  just_audio_windows: ^0.2.1
+  # Cross-platform audio player (Android/iOS/Windows/Linux/macOS/Web)
+  audioplayers: ^6.1.0
   # Windows/Linux video player support (extends video_player to all desktop platforms)
   fvp: ^0.35.2
 
