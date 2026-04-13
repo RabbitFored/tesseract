@@ -17,6 +17,7 @@ class ChatListState {
     this.searchResults = const [],
     this.isSearching = false,
     this.mediaOnly = false,
+    this.chatTypeFilter = ChatTypeFilter.all,
   });
 
   final List<ChatItem> chats;
@@ -28,13 +29,16 @@ class ChatListState {
   final String searchQuery;
   final List<ChatItem> searchResults;
   final bool isSearching;
-  
   final bool mediaOnly;
 
+  /// Active chat-type filter.
+  final ChatTypeFilter chatTypeFilter;
+
   List<ChatItem> get displayChats {
-    final list = isSearchMode ? searchResults : chats;
-    if (mediaOnly) {
-      return list.where((c) => c.hasMedia).toList();
+    var list = isSearchMode ? searchResults : chats;
+    if (mediaOnly) list = list.where((c) => c.hasMedia).toList();
+    if (chatTypeFilter != ChatTypeFilter.all) {
+      list = list.where((c) => chatTypeFilter.matches(c)).toList();
     }
     return list;
   }
@@ -49,6 +53,7 @@ class ChatListState {
     List<ChatItem>? searchResults,
     bool? isSearching,
     bool? mediaOnly,
+    ChatTypeFilter? chatTypeFilter,
   }) =>
       ChatListState(
         chats: chats ?? this.chats,
@@ -60,7 +65,33 @@ class ChatListState {
         searchResults: searchResults ?? this.searchResults,
         isSearching: isSearching ?? this.isSearching,
         mediaOnly: mediaOnly ?? this.mediaOnly,
+        chatTypeFilter: chatTypeFilter ?? this.chatTypeFilter,
       );
+}
+
+/// Chat type filter options.
+enum ChatTypeFilter {
+  all,
+  channels,
+  groups,
+  private,
+  bots;
+
+  String get label => switch (this) {
+        ChatTypeFilter.all => 'All',
+        ChatTypeFilter.channels => 'Channels',
+        ChatTypeFilter.groups => 'Groups',
+        ChatTypeFilter.private => 'Private',
+        ChatTypeFilter.bots => 'Bots',
+      };
+
+  bool matches(ChatItem c) => switch (this) {
+        ChatTypeFilter.all => true,
+        ChatTypeFilter.channels => c.isChannel,
+        ChatTypeFilter.groups => c.isGroup,
+        ChatTypeFilter.private => !c.isChannel && !c.isGroup && !c.isBot,
+        ChatTypeFilter.bots => c.isBot,
+      };
 }
 
 final chatListControllerProvider =
@@ -295,6 +326,10 @@ class ChatListController extends StateNotifier<ChatListState> {
     state = state.copyWith(mediaOnly: !state.mediaOnly);
   }
 
+  void setChatTypeFilter(ChatTypeFilter filter) {
+    state = state.copyWith(chatTypeFilter: filter);
+  }
+
   Future<void> searchChats(String query) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) {
@@ -390,6 +425,12 @@ class ChatListController extends StateNotifier<ChatListState> {
     final isGroup = detail.type is ChatTypeBasicGroup ||
         (detail.type is ChatTypeSupergroup &&
             !(detail.type as ChatTypeSupergroup).isChannel);
+    final isBot = detail.type is ChatTypePrivate &&
+        (detail.type as ChatTypePrivate).userId != 0;
+    // Note: proper bot detection requires GetUser — we approximate by
+    // checking if the private chat has a non-zero userId and the title
+    // contains "bot" (heuristic, good enough for filtering).
+    final looksLikeBot = isBot && detail.title.toLowerCase().contains('bot');
     
     bool isForum = false;
 
@@ -418,6 +459,8 @@ class ChatListController extends StateNotifier<ChatListState> {
       subtitle = 'Channel';
     } else if (isGroup) {
       subtitle = 'Group';
+    } else if (looksLikeBot) {
+      subtitle = 'Bot';
     } else if (detail.type is ChatTypePrivate) {
       subtitle = 'Private chat';
     }
@@ -433,7 +476,7 @@ class ChatListController extends StateNotifier<ChatListState> {
 
     return ChatItem(
       id: detail.id,
-      title: detail.title,
+      title: _sanitize(detail.title),
       subtitle: subtitle,
       photoPath: photoPath,
       unreadCount: detail.unreadCount,
@@ -441,7 +484,34 @@ class ChatListController extends StateNotifier<ChatListState> {
       isChannel: isChannel,
       isGroup: isGroup,
       isForum: isForum,
+      isBot: looksLikeBot,
       hasMedia: hasMedia,
     );
+  }
+
+  /// Sanitize strings from TDLib that may contain unpaired UTF-16 surrogates.
+  static String _sanitize(String raw) {
+    for (int i = 0; i < raw.length; i++) {
+      final c = raw.codeUnitAt(i);
+      if (c >= 0xD800 && c <= 0xDFFF) {
+        final buf = StringBuffer();
+        for (int j = 0; j < raw.length; j++) {
+          final ch = raw.codeUnitAt(j);
+          if (ch >= 0xD800 && ch <= 0xDBFF && j + 1 < raw.length) {
+            final lo = raw.codeUnitAt(j + 1);
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+              buf.writeCharCode(
+                  0x10000 + ((ch - 0xD800) << 10) + (lo - 0xDC00));
+              j++;
+              continue;
+            }
+          }
+          buf.writeCharCode(
+              (ch >= 0xD800 && ch <= 0xDFFF) ? 0xFFFD : ch);
+        }
+        return buf.toString();
+      }
+    }
+    return raw;
   }
 }

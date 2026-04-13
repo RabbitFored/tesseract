@@ -13,9 +13,11 @@ class MediaFileTile extends ConsumerWidget {
   const MediaFileTile({
     super.key,
     required this.media,
+    this.onPreview,
   });
 
   final MediaMessage media;
+  final VoidCallback? onPreview;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -34,6 +36,7 @@ class MediaFileTile extends ConsumerWidget {
 
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      onTap: onPreview,
       leading: Container(
         width: 44,
         height: 44,
@@ -44,7 +47,7 @@ class MediaFileTile extends ConsumerWidget {
         child: Icon(iconData, color: iconColor, size: 22),
       ),
       title: Text(
-        media.fileName,
+        sanitizeText(media.fileName),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodyMedium?.copyWith(
@@ -81,7 +84,7 @@ class MediaFileTile extends ConsumerWidget {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                media.caption,
+                sanitizeText(media.caption),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
@@ -138,7 +141,7 @@ class MediaFileTile extends ConsumerWidget {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Added "${media.fileName}" to download queue'),
+          content: Text('Added "${sanitizeText(media.fileName)}" to download queue'),
           backgroundColor: const Color(0xFF2AABEE),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),

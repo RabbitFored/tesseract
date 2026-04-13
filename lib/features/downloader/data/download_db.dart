@@ -8,31 +8,92 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../domain/download_item.dart';
 import '../domain/download_status.dart';
 
+// ── Pending progress write ────────────────────────────────────────────────────
+
+/// Buffered progress update waiting to be flushed to SQLite.
+class _PendingProgress {
+  _PendingProgress({
+    required this.downloadedSize,
+    required this.status,
+  });
+  int downloadedSize;
+  DownloadStatus status;
+}
+
 /// SQLite database wrapper for the download queue.
 ///
-/// Table schema (v2):
-///   id              INTEGER PRIMARY KEY AUTOINCREMENT
-///   file_id         INTEGER NOT NULL UNIQUE
-///   local_path      TEXT    NOT NULL
-///   total_size      INTEGER NOT NULL
-///   downloaded_size INTEGER DEFAULT 0
-///   status          TEXT    DEFAULT 'queued'
-///   priority        INTEGER DEFAULT 0
-///   file_name       TEXT    DEFAULT ''
-///   chat_id         INTEGER DEFAULT 0
-///   message_id      INTEGER DEFAULT 0
-///   created_at      TEXT
-///   error_reason    TEXT    DEFAULT ''  (Phase 10)
+/// Table schema (v3):
+///   id                INTEGER PRIMARY KEY AUTOINCREMENT
+///   file_id           INTEGER NOT NULL UNIQUE
+///   local_path        TEXT    NOT NULL
+///   total_size        INTEGER NOT NULL
+///   downloaded_size   INTEGER DEFAULT 0
+///   status            TEXT    DEFAULT 'queued'
+///   priority          INTEGER DEFAULT 0
+///   file_name         TEXT    DEFAULT ''
+///   chat_id           INTEGER DEFAULT 0
+///   message_id        INTEGER DEFAULT 0
+///   created_at        TEXT
+///   error_reason      TEXT    DEFAULT ''
+///   retry_count       INTEGER DEFAULT 0
+///   checksum_md5      TEXT    DEFAULT ''
+///   speed_limit_bps   INTEGER DEFAULT 0
+///   scheduled_at      TEXT    DEFAULT ''
+///   mirror_channel_id INTEGER DEFAULT 0
 class DownloadDb {
   static const _dbName = 'download_queue.db';
-  static const _dbVersion = 2;
+  static const _dbVersion = 3;
   static const _table = 'downloads';
+
+  /// How often buffered progress writes are flushed to SQLite.
+  static const _flushInterval = Duration(milliseconds: 500);
 
   Database? _db;
 
+  // ── Write-coalescing buffer ───────────────────────────────────
+  // Accumulates in-flight progress updates so we write to SQLite at most
+  // once per [_flushInterval] per file instead of on every UpdateFile event.
+  // Status transitions (completed/error/paused) bypass the buffer and write
+  // immediately so the UI reflects them without delay.
+  final Map<int, _PendingProgress> _pendingProgress = {};
+  Timer? _flushTimer;
+
+  /// Start the periodic flush timer. Called once after [database] is ready.
+  void _startFlushTimer() {
+    _flushTimer ??= Timer.periodic(_flushInterval, (_) => _flushPending());
+  }
+
+  /// Write all buffered progress rows to SQLite in a single transaction.
+  Future<void> _flushPending() async {
+    if (_pendingProgress.isEmpty) return;
+    final snapshot = Map<int, _PendingProgress>.from(_pendingProgress);
+    _pendingProgress.clear();
+
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final entry in snapshot.entries) {
+        final fileId = entry.key;
+        final p = entry.value;
+        final fields = <String, dynamic>{
+          'downloaded_size': p.downloadedSize,
+          'status': p.status.name,
+        };
+        await txn.update(
+          _table,
+          fields,
+          where: 'file_id = ?',
+          whereArgs: [fileId],
+        );
+      }
+    });
+  }
+
   /// Singleton-friendly access; safe to call multiple times.
   Future<Database> get database async {
-    _db ??= await _open();
+    if (_db == null) {
+      _db = await _open();
+      _startFlushTimer();
+    }
     return _db!;
   }
 
@@ -48,33 +109,62 @@ class DownloadDb {
     return openDatabase(
       path,
       version: _dbVersion,
+      // WAL mode: readers never block writers and writers never block readers.
+      // This eliminates the "database locked" warning during concurrent
+      // progress reads (downloadQueueProvider) and writes (_flushPending).
+      onOpen: (db) async {
+        await db.execute('PRAGMA journal_mode=WAL');
+        await db.execute('PRAGMA synchronous=NORMAL');
+        await db.execute('PRAGMA cache_size=-4096'); // 4 MB page cache
+      },
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE $_table (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            file_id         INTEGER NOT NULL UNIQUE,
-            local_path      TEXT    NOT NULL,
-            total_size      INTEGER NOT NULL,
-            downloaded_size INTEGER DEFAULT 0,
-            status          TEXT    DEFAULT 'queued',
-            priority        INTEGER DEFAULT 0,
-            file_name       TEXT    DEFAULT '',
-            chat_id         INTEGER DEFAULT 0,
-            message_id      INTEGER DEFAULT 0,
-            created_at      TEXT,
-            error_reason    TEXT    DEFAULT ''
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id           INTEGER NOT NULL UNIQUE,
+            local_path        TEXT    NOT NULL,
+            total_size        INTEGER NOT NULL,
+            downloaded_size   INTEGER DEFAULT 0,
+            status            TEXT    DEFAULT 'queued',
+            priority          INTEGER DEFAULT 0,
+            file_name         TEXT    DEFAULT '',
+            chat_id           INTEGER DEFAULT 0,
+            message_id        INTEGER DEFAULT 0,
+            created_at        TEXT,
+            error_reason      TEXT    DEFAULT '',
+            retry_count       INTEGER DEFAULT 0,
+            checksum_md5      TEXT    DEFAULT '',
+            speed_limit_bps   INTEGER DEFAULT 0,
+            scheduled_at      TEXT    DEFAULT '',
+            mirror_channel_id INTEGER DEFAULT 0
           )
         ''');
-        // Index for quick lookups by status and priority.
         await db.execute(
           'CREATE INDEX idx_status_priority ON $_table (status, priority DESC)',
         );
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
-          // Phase 10: Add error_reason column for extraction error tracking.
           await db.execute(
             "ALTER TABLE $_table ADD COLUMN error_reason TEXT DEFAULT ''",
+          );
+        }
+        if (oldVersion < 3) {
+          // v3: retry tracking, checksum, per-file speed limit, scheduling, mirror.
+          await db.execute(
+            'ALTER TABLE $_table ADD COLUMN retry_count INTEGER DEFAULT 0',
+          );
+          await db.execute(
+            "ALTER TABLE $_table ADD COLUMN checksum_md5 TEXT DEFAULT ''",
+          );
+          await db.execute(
+            'ALTER TABLE $_table ADD COLUMN speed_limit_bps INTEGER DEFAULT 0',
+          );
+          await db.execute(
+            "ALTER TABLE $_table ADD COLUMN scheduled_at TEXT DEFAULT ''",
+          );
+          await db.execute(
+            'ALTER TABLE $_table ADD COLUMN mirror_channel_id INTEGER DEFAULT 0',
           );
         }
       },
@@ -93,39 +183,63 @@ class DownloadDb {
     );
   }
 
-  /// Update progress (downloaded_size) and status for a given file_id.
-  Future<int> updateProgress(
+  /// Buffer a progress update (downloaded_size + status).
+  /// Writes are coalesced and flushed every [_flushInterval].
+  /// Call [updateProgressImmediate] for status transitions that must be
+  /// visible in the UI without delay (completed, error, paused).
+  Future<void> updateProgress(
     int fileId, {
     required int downloadedSize,
     required DownloadStatus status,
   }) async {
+    // Status transitions bypass the buffer — write immediately.
+    if (status != DownloadStatus.downloading) {
+      await _flushPending(); // flush any buffered progress first
+      return updateProgressImmediate(fileId,
+          downloadedSize: downloadedSize, status: status);
+    }
+    // Coalesce: overwrite any existing pending entry for this file.
+    _pendingProgress[fileId] = _PendingProgress(
+      downloadedSize: downloadedSize,
+      status: status,
+    );
+  }
+
+  /// Buffer a progress + path update (used on download completion).
+  /// Always writes immediately since it accompanies a status transition.
+  Future<void> updateProgressAndPath(
+    int fileId, {
+    required int downloadedSize,
+    required DownloadStatus status,
+    required String localPath,
+  }) async {
+    await _flushPending(); // flush any buffered progress first
     final db = await database;
-    return db.update(
+    await db.update(
       _table,
       {
         'downloaded_size': downloadedSize,
         'status': status.name,
+        'local_path': localPath,
       },
       where: 'file_id = ?',
       whereArgs: [fileId],
     );
   }
 
-  /// Update progress, status, AND local_path (used when download completes
-  /// so the stored path reflects TDLib's actual saved file location).
-  Future<int> updateProgressAndPath(
+  /// Write a progress update immediately, bypassing the coalesce buffer.
+  /// Used for status transitions (completed, error, paused).
+  Future<void> updateProgressImmediate(
     int fileId, {
     required int downloadedSize,
     required DownloadStatus status,
-    required String localPath,
   }) async {
     final db = await database;
-    return db.update(
+    await db.update(
       _table,
       {
         'downloaded_size': downloadedSize,
         'status': status.name,
-        'local_path': localPath,
       },
       where: 'file_id = ?',
       whereArgs: [fileId],
@@ -252,6 +366,38 @@ class DownloadDb {
     );
   }
 
+  /// Increment the retry counter for a file.
+  Future<void> incrementRetryCount(int fileId) async {
+    final db = await database;
+    await db.rawUpdate(
+      'UPDATE $_table SET retry_count = retry_count + 1 WHERE file_id = ?',
+      [fileId],
+    );
+  }
+
+  /// Reset retry counter (used when user manually retries).
+  Future<void> resetRetryCount(int fileId) async {
+    final db = await database;
+    await db.update(
+      _table,
+      {'retry_count': 0},
+      where: 'file_id = ?',
+      whereArgs: [fileId],
+    );
+  }
+
+  /// Return all items that are scheduled and whose scheduled_at has passed.
+  Future<List<DownloadItem>> getDueScheduledItems() async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final rows = await db.query(
+      _table,
+      where: "status = 'queued' AND scheduled_at != '' AND scheduled_at <= ?",
+      whereArgs: [now],
+    );
+    return rows.map(DownloadItem.fromMap).toList();
+  }
+
   /// Hot-swaps the underlying `file_id` mapping when TDLib invalidates the cache geometry 
   /// (used for corrupted chunk recovery).
   Future<int> migrateFileId({required int oldFileId, required int newFileId}) async {
@@ -280,6 +426,10 @@ class DownloadDb {
 
   /// Close the database connection.
   Future<void> close() async {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    // Flush any remaining buffered progress before closing.
+    await _flushPending();
     await _db?.close();
     _db = null;
   }

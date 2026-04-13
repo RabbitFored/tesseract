@@ -296,9 +296,9 @@ class TdLibClient {
         // Patch any remaining null values by naming convention.
         for (final key in json.keys.toList()) {
           if (json[key] != null || key.startsWith('@')) continue;
-          if (_isBoolKey(key))        json[key] = false;
-          else if (_isIntKey(key))    json[key] = 0;
-          else if (_isStringKey(key)) json[key] = '';
+          if (_isBoolKey(key))        { json[key] = false; }
+          else if (_isIntKey(key))    { json[key] = 0; }
+          else if (_isStringKey(key)) { json[key] = ''; }
         }
       }
       for (final value in json.values) {
@@ -373,6 +373,46 @@ class TdLibClient {
       // Ensure origin exists for the fromJson constructor.
       if (json['origin'] == null) {
         json['origin'] = {'@type': 'messageForwardOriginHiddenUser', 'sender_name': ''};
+      }
+    }
+
+    // Poll.question: 1.8.x sends question as a FormattedText object,
+    // 1.6.0 Dart SDK Poll.fromJson expects a plain String at line 51.
+    if (type == 'poll') {
+      final question = json['question'];
+      if (question is Map<String, dynamic>) {
+        json['question'] = question['text'] as String? ?? '';
+      }
+
+      // Poll.options: 1.8.x sends List<PollOption> objects, 1.6.0 expects List<String>.
+      final options = json['options'];
+      if (options is List && options.isNotEmpty && options.first is Map) {
+        json['options'] = options.map((o) {
+          if (o is Map<String, dynamic>) {
+            final text = o['text'];
+            if (text is Map<String, dynamic>) {
+              return text['text'] as String? ?? '';
+            }
+            return text as String? ?? '';
+          }
+          return o.toString();
+        }).toList();
+      }
+    }
+
+    // PollOption.text: 1.8.x sends as FormattedText, 1.6.0 expects plain String.
+    if (type == 'pollOption') {
+      final text = json['text'];
+      if (text is Map<String, dynamic>) {
+        json['text'] = text['text'] as String? ?? '';
+      }
+    }
+
+    // InlineKeyboardButtonTypeSwitchInline: 1.8.x may omit target_chat
+    // (means current chat). Inject a targetChatCurrent default.
+    if (type == 'inlineKeyboardButtonTypeSwitchInline') {
+      if (json['target_chat'] == null) {
+        json['target_chat'] = {'@type': 'targetChatCurrent'};
       }
     }
   }
@@ -497,7 +537,15 @@ class TdLibClient {
     'photo': {
       'has_stickers': false,
     },
-    'chatMemberStatusCreator': {
+    // Poll: 1.8.x adds fields the 1.6.0 SDK doesn't know about.
+    'poll': {
+      'is_anonymous': false, 'allows_multiple_answers': false,
+      'is_closed': false, 'total_voter_count': 0,
+    },
+    'pollOption': {
+      'voter_count': 0, 'vote_percentage': 0,
+      'is_chosen': false, 'is_being_chosen': false,
+    },    'chatMemberStatusCreator': {
       'is_anonymous': false, 'is_member': false,
     },
     'chatMemberStatusAdministrator': {
@@ -505,6 +553,13 @@ class TdLibClient {
     },
     'chatMemberStatusRestricted': {
       'is_member': false,
+    },
+    // TargetChatChosen: 1.8.x omits false bool fields.
+    'targetChatChosen': {
+      'allow_user_chats': false,
+      'allow_bot_chats': false,
+      'allow_group_chats': false,
+      'allow_channel_chats': false,
     },
   };
 
@@ -531,7 +586,7 @@ class TdLibClient {
         key.startsWith('added_to_') || key.startsWith('join_') ||
         key.startsWith('sign_') || key.startsWith('supports_') ||
         key.startsWith('contains_') || key.startsWith('default_disable_') ||
-        key.startsWith('set_');
+        key.startsWith('allow_') || key.startsWith('set_');
   }
 
   static bool _isIntKey(String key) {

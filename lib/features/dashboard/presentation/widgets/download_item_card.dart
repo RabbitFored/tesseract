@@ -60,9 +60,9 @@ class DownloadItemCard extends ConsumerWidget {
                     children: [
                       // File name
                       Text(
-                        item.fileName.isNotEmpty
+                        sanitizeText(item.fileName.isNotEmpty
                             ? item.fileName
-                            : 'File #${item.fileId}',
+                            : 'File #${item.fileId}'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodyMedium?.copyWith(
@@ -162,6 +162,58 @@ class DownloadItemCard extends ConsumerWidget {
                             ),
                           ],
                           const SizedBox(width: 8),
+
+                          // Mirror badge
+                          if (item.mirrorChannelId != 0) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2AABEE)
+                                    .withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.sync_rounded,
+                                      size: 9, color: Color(0xFF2AABEE)),
+                                  SizedBox(width: 2),
+                                  Text(
+                                    'Mirror',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF2AABEE),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+
+                          // Retry count badge
+                          if (item.retryCount > 0) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFAB00)
+                                    .withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '↺${item.retryCount}',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFFFAB00),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                          ],
 
                           // Size progress
                           Expanded(
@@ -361,7 +413,7 @@ class _ActionButtons extends ConsumerWidget {
               icon: Icons.refresh_rounded,
               tooltip: 'Retry',
               color: const Color(0xFF2AABEE),
-              onPressed: () => manager.retryDownload(item.fileId),
+              onPressed: () => manager.manualRetry(item.fileId),
             ),
             _IconBtn(
               icon: Icons.close_rounded,
@@ -403,7 +455,7 @@ class _ActionButtons extends ConsumerWidget {
         content: Text(
           item.isActive
               ? 'This will cancel the active download and remove it from the queue.'
-              : 'Remove "${item.fileName.isNotEmpty ? item.fileName : 'File #${item.fileId}'}" from the queue?',
+              : 'Remove "${sanitizeText(item.fileName.isNotEmpty ? item.fileName : 'File #${item.fileId}')}" from the queue?',
         ),
         actions: [
           TextButton(

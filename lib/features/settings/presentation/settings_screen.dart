@@ -4,11 +4,15 @@ import 'package:file_picker/file_picker.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../auth/data/auth_controller.dart';
+import '../../downloader/data/download_manager.dart';
 import '../data/settings_controller.dart';
 import '../data/user_profile_provider.dart';
+import '../domain/settings_state.dart';
+import 'widgets/mirror_rules_screen.dart';
+import 'widgets/proxy_settings_sheet.dart';
+import 'widgets/schedule_settings_sheet.dart';
 
-/// Settings screen with concurrent download slider, theme toggle,
-/// and smart categorization toggle.
+/// Settings screen — exposes all user-configurable options.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
@@ -29,12 +33,12 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
-          // ── Account section ───────────────────────────────
+          // ── Account ───────────────────────────────────────
           _SectionHeader(title: 'Account', theme: theme),
           const _AccountCard(),
           const SizedBox(height: 8),
 
-          // ── Download section ──────────────────────────────
+          // ── Downloads ─────────────────────────────────────
           _SectionHeader(title: 'Downloads', theme: theme),
 
           // Concurrent downloads slider
@@ -48,30 +52,14 @@ class SettingsScreen extends ConsumerWidget {
                   children: [
                     Text(
                       'Concurrent Downloads',
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
+                      style: theme.textTheme.bodyLarge
+                          ?.copyWith(fontWeight: FontWeight.w500),
                     ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF2AABEE).withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '${settings.concurrentDownloads}',
-                        style: const TextStyle(
-                          color: Color(0xFF2AABEE),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
+                    _Badge('${settings.concurrentDownloads}'),
                   ],
                 ),
                 Text(
-                  'Maximum number of simultaneous downloads',
+                  'Maximum simultaneous downloads',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -92,16 +80,15 @@ class SettingsScreen extends ConsumerWidget {
 
           const Divider(indent: 16, endIndent: 16, height: 1),
 
-          // Smart categorization
           SwitchListTile(
             title: const Text('Smart Categorization'),
             subtitle: Text(
-              'Auto-organize files into folders by type\n'
-              '(Videos/, Audio/, Documents/, Photos/)',
+              'Auto-organize files into type-based folders',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            secondary: const Icon(Icons.folder_special_rounded),
             value: settings.smartCategorization,
             activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
             activeThumbColor: const Color(0xFF2AABEE),
@@ -110,15 +97,107 @@ class SettingsScreen extends ConsumerWidget {
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           ),
 
+          const Divider(indent: 16, endIndent: 16, height: 1),
+
+          SwitchListTile(
+            title: const Text('Auto-Extract Archives'),
+            subtitle: Text(
+              'Extract ZIP/TAR/GZ after download',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            secondary: Icon(
+              Icons.folder_zip_rounded,
+              color: settings.autoExtractArchives
+                  ? const Color(0xFFAB47BC)
+                  : null,
+            ),
+            value: settings.autoExtractArchives,
+            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+            activeThumbColor: const Color(0xFF2AABEE),
+            onChanged: controller.setAutoExtractArchives,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ),
+
+          const Divider(indent: 16, endIndent: 16, height: 1),
+
+          SwitchListTile(
+            title: const Text('Verify Checksums'),
+            subtitle: Text(
+              'Verify MD5 integrity after download completes',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            secondary: Icon(
+              Icons.verified_rounded,
+              color: settings.verifyChecksums
+                  ? const Color(0xFF26A69A)
+                  : null,
+            ),
+            value: settings.verifyChecksums,
+            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+            activeThumbColor: const Color(0xFF2AABEE),
+            onChanged: controller.setVerifyChecksums,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ),
+
           const SizedBox(height: 16),
 
-          // ── Automation & Resources section ─────────────────
-          _SectionHeader(title: 'Automation & Resources', theme: theme),
+          // ── Bandwidth ─────────────────────────────────────
+          _SectionHeader(title: 'Bandwidth', theme: theme),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Card(
+              color: theme.colorScheme.surfaceContainerHigh,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.info_outline_rounded,
+                        size: 18, color: Color(0xFF78909C)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'TDLib has no safe speed-cap API — '
+                        'hard bandwidth limits cause TCP session drops. '
+                        'To limit bandwidth, reduce Concurrent Downloads to 1.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── Connection Recovery ───────────────────────────
+          _SectionHeader(title: 'Connection Recovery', theme: theme),
+
+          _RetryTile(settings: settings, controller: controller),
+
+          const SizedBox(height: 16),
+
+          // ── Scheduling & Network Rules ────────────────────
+          _SectionHeader(title: 'Scheduling & Network Rules', theme: theme),
 
           SwitchListTile(
             title: const Text('Wi-Fi Only Mode'),
             subtitle: Text(
-              'Pause all downloads when not on Wi-Fi',
+              'Pause downloads when not on Wi-Fi',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -127,9 +206,7 @@ class SettingsScreen extends ConsumerWidget {
               settings.wifiOnly
                   ? Icons.wifi_rounded
                   : Icons.wifi_off_rounded,
-              color: settings.wifiOnly
-                  ? const Color(0xFF2AABEE)
-                  : const Color(0xFF78909C),
+              color: settings.wifiOnly ? const Color(0xFF2AABEE) : null,
             ),
             value: settings.wifiOnly,
             activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
@@ -141,21 +218,51 @@ class SettingsScreen extends ConsumerWidget {
 
           const Divider(indent: 16, endIndent: 16, height: 1),
 
+          ListTile(
+            leading: const Icon(Icons.schedule_rounded),
+            title: const Text('Download Schedule'),
+            subtitle: Text(
+              settings.downloadOnlyOnSchedule
+                  ? 'Active: ${_fmtHour(settings.scheduleStartHour)} – '
+                      '${_fmtHour(settings.scheduleEndHour)}'
+                  : 'Disabled',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: settings.downloadOnlyOnSchedule
+                    ? const Color(0xFF2AABEE)
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              builder: (_) => ScheduleSettingsSheet(
+                settings: settings,
+                controller: controller,
+              ),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── Thermal & Battery ─────────────────────────────
+          _SectionHeader(title: 'Thermal & Battery', theme: theme),
+
           SwitchListTile(
             title: const Text('Pause on Low Battery'),
             subtitle: Text(
-              'Auto-pause downloads when battery drops below 15%',
+              'Pause below ${settings.lowBatteryThresholdPct}%',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             secondary: Icon(
-              settings.pauseOnLowBattery
-                  ? Icons.battery_saver_rounded
-                  : Icons.battery_std_rounded,
+              Icons.battery_saver_rounded,
               color: settings.pauseOnLowBattery
                   ? const Color(0xFFFFAB00)
-                  : const Color(0xFF78909C),
+                  : null,
             ),
             value: settings.pauseOnLowBattery,
             activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
@@ -165,76 +272,232 @@ class SettingsScreen extends ConsumerWidget {
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           ),
 
+          if (settings.pauseOnLowBattery) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Battery threshold',
+                          style: theme.textTheme.bodySmall),
+                      _Badge('${settings.lowBatteryThresholdPct}%'),
+                    ],
+                  ),
+                  Slider(
+                    value: settings.lowBatteryThresholdPct.toDouble(),
+                    min: 5,
+                    max: 50,
+                    divisions: 9,
+                    label: '${settings.lowBatteryThresholdPct}%',
+                    activeColor: const Color(0xFFFFAB00),
+                    onChanged: (v) =>
+                        controller.setLowBatteryThreshold(v.round()),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           const Divider(indent: 16, endIndent: 16, height: 1),
 
           SwitchListTile(
-            title: const Text('Auto-Extract Archives'),
+            title: const Text('Pause on High Temperature'),
             subtitle: Text(
-              'Automatically extract ZIP/TAR/GZ files after download',
+              'Pause downloads when device overheats',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             secondary: Icon(
-              Icons.folder_zip_rounded,
-              color: settings.autoExtractArchives
-                  ? const Color(0xFFAB47BC)
-                  : const Color(0xFF78909C),
+              Icons.thermostat_rounded,
+              color: settings.pauseOnHighThermal
+                  ? const Color(0xFFEF5350)
+                  : null,
             ),
-            value: settings.autoExtractArchives,
+            value: settings.pauseOnHighThermal,
             activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
             activeThumbColor: const Color(0xFF2AABEE),
-            onChanged: controller.setAutoExtractArchives,
+            onChanged: controller.setPauseOnHighThermal,
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           ),
 
-          // Extraction info card (visible when auto-extract is on)
-          if (settings.autoExtractArchives) ...[
+          const Divider(indent: 16, endIndent: 16, height: 1),
+
+          SwitchListTile(
+            title: const Text('Charging Only Mode'),
+            subtitle: Text(
+              'Only download while device is charging',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            secondary: Icon(
+              Icons.battery_charging_full_rounded,
+              color: settings.chargingOnlyMode
+                  ? const Color(0xFF66BB6A)
+                  : null,
+            ),
+            value: settings.chargingOnlyMode,
+            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+            activeThumbColor: const Color(0xFF2AABEE),
+            onChanged: controller.setChargingOnlyMode,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── Proxy ─────────────────────────────────────────
+          _SectionHeader(title: 'Proxy', theme: theme),
+
+          ListTile(
+            leading: Icon(
+              Icons.vpn_lock_rounded,
+              color: settings.proxyEnabled
+                  ? const Color(0xFF2AABEE)
+                  : null,
+            ),
+            title: const Text('Proxy Settings'),
+            subtitle: Text(
+              settings.proxyEnabled
+                  ? '${settings.proxyType.name.toUpperCase()} — '
+                      '${settings.proxyHost}:${settings.proxyPort}'
+                  : 'Disabled',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: settings.proxyEnabled
+                    ? const Color(0xFF2AABEE)
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              builder: (_) => ProxySettingsSheet(
+                settings: settings,
+                controller: controller,
+              ),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── Channel Mirroring ─────────────────────────────
+          _SectionHeader(title: 'Channel Mirroring', theme: theme),
+
+          ListTile(
+            leading: const Icon(Icons.sync_rounded),
+            title: const Text('Mirror Rules'),
+            subtitle: Text(
+              settings.mirrorRules.isEmpty
+                  ? 'No channels mirrored'
+                  : '${settings.mirrorRules.length} channel(s) mirrored',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const MirrorRulesScreen(),
+              ),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ── Storage ───────────────────────────────────────
+          _SectionHeader(title: 'Storage', theme: theme),
+
+          ListTile(
+            leading: const Icon(Icons.folder_outlined),
+            title: const Text('Download Location'),
+            subtitle: Text(
+              settings.downloadBasePath.isNotEmpty
+                  ? settings.downloadBasePath
+                  : 'Not configured',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            trailing: const Icon(Icons.edit_rounded, size: 20),
+            onTap: () async {
+              final result = await FilePicker.platform.getDirectoryPath();
+              if (result != null) controller.setDownloadPath(result);
+            },
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ),
+
+          const Divider(indent: 16, endIndent: 16, height: 1),
+
+          _AutoCleanupTile(settings: settings, controller: controller),
+
+          if (settings.autoCleanupEnabled) ...[
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Card(
-                color: const Color(0xFFAB47BC).withValues(alpha: 0.08),
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Icon(
-                        Icons.info_outline_rounded,
-                        size: 18,
-                        color: Color(0xFFAB47BC),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'Supported formats: .zip, .tar, .gz\n'
-                          'Extraction runs in a background isolate — '
-                          'downloads continue uninterrupted.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
+                      Text('Delete after', style: theme.textTheme.bodySmall),
+                      _Badge('${settings.autoCleanupAfterDays} days'),
                     ],
                   ),
-                ),
+                  Slider(
+                    value: settings.autoCleanupAfterDays.toDouble(),
+                    min: 1,
+                    max: 90,
+                    divisions: 17,
+                    label: '${settings.autoCleanupAfterDays}d',
+                    activeColor: const Color(0xFFEF5350),
+                    onChanged: (v) =>
+                        controller.setAutoCleanupAfterDays(v.round()),
+                  ),
+                  const SizedBox(height: 8),
+                  Consumer(builder: (ctx, ref, _) {
+                    return OutlinedButton.icon(
+                      onPressed: () async {
+                        final manager = ref.read(downloadManagerProvider);
+                        final result = await manager.runCleanupNow();
+                        if (ctx.mounted) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                            content: Text(
+                              'Cleaned up ${result.deletedCount} files, '
+                              'freed ${result.freedBytes ~/ 1024}KB',
+                            ),
+                          ));
+                        }
+                      },
+                      icon: const Icon(Icons.cleaning_services_rounded),
+                      label: const Text('Run Cleanup Now'),
+                    );
+                  }),
+                ],
               ),
             ),
           ],
 
           const SizedBox(height: 16),
 
-          // ── Appearance section ────────────────────────────
+          // ── Appearance ────────────────────────────────────
           _SectionHeader(title: 'Appearance', theme: theme),
 
           SwitchListTile(
             title: const Text('Dark Mode'),
             subtitle: Text(
-              settings.isDarkMode ? 'Dark theme active' : 'Light theme active',
+              settings.isDarkMode ? 'Dark theme' : 'Light theme',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -255,89 +518,6 @@ class SettingsScreen extends ConsumerWidget {
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           ),
 
-          const SizedBox(height: 16),
-
-          // ── Storage info ──────────────────────────────────
-          _SectionHeader(title: 'Storage', theme: theme),
-
-          ListTile(
-            leading: const Icon(Icons.folder_outlined),
-            title: const Text('Download Location'),
-            subtitle: Text(
-              settings.downloadBasePath.isNotEmpty
-                  ? settings.downloadBasePath
-                  : 'Not configured',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            trailing: const Icon(Icons.edit_rounded, size: 20),
-            onTap: () async {
-              final String? result = await FilePicker.platform.getDirectoryPath();
-              if (result != null) {
-                 controller.setDownloadPath(result);
-              }
-            },
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          ),
-
-          if (settings.smartCategorization) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-              child: Card(
-                color: theme.colorScheme.surfaceContainerHigh,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Folder Structure Preview',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      for (final folder in [
-                        'Videos/',
-                        'Audio/',
-                        'Photos/',
-                        'Documents/',
-                        'Archives/',
-                        'Other/',
-                      ])
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8, bottom: 3),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.folder_rounded,
-                                size: 16,
-                                color: const Color(0xFFFFAB00)
-                                    .withValues(alpha: 0.6),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                folder,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontFamily: 'monospace',
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-
           const SizedBox(height: 24),
 
           // ── About ─────────────────────────────────────────
@@ -347,7 +527,7 @@ class SettingsScreen extends ConsumerWidget {
             leading: const Icon(Icons.info_outline_rounded),
             title: Text(AppConstants.appName),
             subtitle: Text(
-              'v${AppConstants.appVersion} • Developed by ${AppConstants.developer}\n'
+              'v${AppConstants.appVersion} • ${AppConstants.developer}\n'
               'Powered by TDLib',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -358,11 +538,181 @@ class SettingsScreen extends ConsumerWidget {
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           ),
+
+          const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
+  static String _fmtHour(int h) =>
+      '${h.toString().padLeft(2, '0')}:00';
+}
+
+// ── Shared widgets ────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.theme});
+  final String title;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Text(
+          title,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: const Color(0xFF2AABEE),
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.5,
+          ),
+        ),
+      );
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge(this.label);
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2AABEE).withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFF2AABEE),
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+          ),
+        ),
+      );
+}
+
+// ── Retry tile ────────────────────────────────────────────────────
+
+class _RetryTile extends StatelessWidget {
+  const _RetryTile({required this.settings, required this.controller});
+  final SettingsState settings;
+  final SettingsController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.replay_rounded, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Auto-Retry Attempts',
+                    style: theme.textTheme.bodyLarge
+                        ?.copyWith(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              _Badge(settings.maxAutoRetries == 0
+                  ? 'Off'
+                  : '${settings.maxAutoRetries}×'),
+            ],
+          ),
+          Text(
+            'Automatic retries on connection drop (0 = disabled)',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          Slider(
+            value: settings.maxAutoRetries.toDouble(),
+            min: 0,
+            max: 10,
+            divisions: 10,
+            label: '${settings.maxAutoRetries}',
+            activeColor: const Color(0xFF2AABEE),
+            onChanged: (v) => controller.setMaxAutoRetries(v.round()),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Backoff base delay',
+                style: theme.textTheme.bodySmall,
+              ),
+              _Badge('${settings.retryBackoffBaseSeconds}s'),
+            ],
+          ),
+          Slider(
+            value: settings.retryBackoffBaseSeconds.toDouble(),
+            min: 1,
+            max: 30,
+            divisions: 29,
+            label: '${settings.retryBackoffBaseSeconds}s',
+            activeColor: const Color(0xFF2AABEE),
+            onChanged: (v) => controller.setRetryBackoffBase(v.round()),
+          ),
+          Text(
+            'Delay = base × 2ⁿ (exponential backoff)',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
         ],
       ),
     );
   }
 }
+
+// ── Auto-cleanup tile ─────────────────────────────────────────────
+
+class _AutoCleanupTile extends StatelessWidget {
+  const _AutoCleanupTile(
+      {required this.settings, required this.controller});
+  final SettingsState settings;
+  final SettingsController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SwitchListTile(
+      title: const Text('Smart Storage Retention'),
+      subtitle: Text(
+        settings.autoCleanupEnabled
+            ? 'Auto-delete completed files after '
+                '${settings.autoCleanupAfterDays} days'
+            : 'Completed files kept indefinitely',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      secondary: Icon(
+        Icons.auto_delete_rounded,
+        color: settings.autoCleanupEnabled
+            ? const Color(0xFFEF5350)
+            : null,
+      ),
+      value: settings.autoCleanupEnabled,
+      activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+      activeThumbColor: const Color(0xFF2AABEE),
+      onChanged: controller.setAutoCleanupEnabled,
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    );
+  }
+}
+
+// ── Account card ──────────────────────────────────────────────────
 
 class _AccountCard extends ConsumerWidget {
   const _AccountCard();
@@ -392,9 +742,8 @@ class _AccountCard extends ConsumerWidget {
         final name = [user.firstName, user.lastName]
             .where((s) => s.isNotEmpty)
             .join(' ');
-        final initials = name.isNotEmpty
-            ? name.characters.first.toUpperCase()
-            : '?';
+        final initials =
+            name.isNotEmpty ? name.characters.first.toUpperCase() : '?';
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -404,8 +753,7 @@ class _AccountCard extends ConsumerWidget {
                 color: theme.colorScheme.surfaceContainerHigh,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                    borderRadius: BorderRadius.circular(12)),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Row(
@@ -429,9 +777,8 @@ class _AccountCard extends ConsumerWidget {
                           children: [
                             Text(
                               name,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
+                              style: theme.textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.bold),
                             ),
                             if (user.phoneNumber.isNotEmpty) ...[
                               const SizedBox(height: 2),
@@ -467,8 +814,7 @@ class _AccountCard extends ConsumerWidget {
                   side: const BorderSide(color: Color(0xFFFF1744)),
                   minimumSize: const Size.fromHeight(48),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                      borderRadius: BorderRadius.circular(12)),
                 ),
               ),
             ],
@@ -484,7 +830,8 @@ class _AccountCard extends ConsumerWidget {
       builder: (ctx) => AlertDialog(
         title: const Text('Log out of Telegram?'),
         content: const Text(
-          'Active downloads will be cancelled. You will need to wait for a code to sign back in.',
+          'Active downloads will be cancelled. '
+          'You will need to sign back in.',
         ),
         actions: [
           TextButton(
@@ -494,8 +841,7 @@ class _AccountCard extends ConsumerWidget {
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFFF1744),
-            ),
+                backgroundColor: const Color(0xFFFF1744)),
             child: const Text('Log Out'),
           ),
         ],
@@ -508,26 +854,5 @@ class _AccountCard extends ConsumerWidget {
       }
       ref.read(authControllerProvider.notifier).logOut();
     }
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, required this.theme});
-  final String title;
-  final ThemeData theme;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Text(
-        title,
-        style: theme.textTheme.labelLarge?.copyWith(
-          color: const Color(0xFF2AABEE),
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
   }
 }

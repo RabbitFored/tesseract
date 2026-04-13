@@ -10,9 +10,10 @@ import '../../downloader/domain/download_item.dart';
 import '../data/chat_media_controller.dart';
 import '../domain/media_message.dart';
 import 'widgets/media_file_tile.dart';
+import 'widgets/media_preview_sheet.dart';
 
-/// Screen showing filtered media files from a specific chat.
-/// Supports infinite scroll via TDLib pagination and debounced search.
+/// Screen showing media files from a specific chat with server-side type
+/// filtering and in-app media preview.
 class ChatMediaScreen extends ConsumerStatefulWidget {
   const ChatMediaScreen({
     super.key,
@@ -33,18 +34,17 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
   final _searchFocusNode = FocusNode();
-  MediaType? _filterType;
   bool _isSearchBarVisible = false;
   Timer? _debounce;
+
+  ChatMediaConfig get _config =>
+      ChatMediaConfig(widget.chatId, widget.messageThreadId);
 
   @override
   void initState() {
     super.initState();
-    Future.microtask(() {
-      ref
-          .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-          .loadMedia();
-    });
+    Future.microtask(
+        () => ref.read(chatMediaControllerProvider(_config).notifier).loadMedia());
     _scrollController.addListener(_onScroll);
   }
 
@@ -60,68 +60,39 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
   void _onScroll() {
     if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 300) {
-      ref
-          .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-          .loadMore();
+      ref.read(chatMediaControllerProvider(_config).notifier).loadMore();
     }
   }
 
-  /// 500ms debounce on search input.
   void _onSearchChanged(String query) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 500), () {
       if (query.trim().isEmpty) {
-        ref
-            .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-            .clearSearch();
+        ref.read(chatMediaControllerProvider(_config).notifier).clearSearch();
       } else {
-        ref
-            .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-            .searchMedia(query);
+        ref.read(chatMediaControllerProvider(_config).notifier).searchMedia(query);
       }
     });
   }
 
   void _toggleSearch() {
-    setState(() {
-      _isSearchBarVisible = !_isSearchBarVisible;
-      if (!_isSearchBarVisible) {
-        _searchController.clear();
-        _debounce?.cancel();
-        ref
-            .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-            .clearSearch();
-      } else {
-        // Auto-focus the search field.
-        Future.microtask(() => _searchFocusNode.requestFocus());
-      }
-    });
-  }
-
-  void _clearSearchField() {
-    _searchController.clear();
-    _debounce?.cancel();
-    ref
-        .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-        .clearSearch();
+    setState(() => _isSearchBarVisible = !_isSearchBarVisible);
+    if (!_isSearchBarVisible) {
+      _searchController.clear();
+      _debounce?.cancel();
+      ref.read(chatMediaControllerProvider(_config).notifier).clearSearch();
+    } else {
+      Future.microtask(() => _searchFocusNode.requestFocus());
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)));
+    final state = ref.watch(chatMediaControllerProvider(_config));
     final theme = Theme.of(context);
-
-    // Use the state's active display list (search or history).
-    final displayMedia = state.displayMedia;
-
-    // Apply local type filter on top of active list.
-    final filteredMedia = _filterType == null
-        ? displayMedia
-        : displayMedia.where((m) => m.mediaType == _filterType).toList();
-
-    final isLoadingAny = state.isSearchMode
-        ? state.isSearching
-        : state.isLoadingMore;
+    final media = state.displayMedia;
+    final isLoadingMore =
+        state.isSearchMode ? state.isSearching : state.isLoadingMore;
 
     return Scaffold(
       appBar: AppBar(
@@ -130,83 +101,86 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
                 controller: _searchController,
                 focusNode: _searchFocusNode,
                 onChanged: _onSearchChanged,
-                onClear: _clearSearchField,
+                onClear: () {
+                  _searchController.clear();
+                  ref.read(chatMediaControllerProvider(_config).notifier).clearSearch();
+                },
               )
-            : _TitleColumn(
-                title: widget.chatTitle,
-                subtitle: state.isSearchMode
-                    ? '${state.searchResults.length} results for "${state.searchQuery}"'
-                    : state.isLoading
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    sanitizeText(widget.chatTitle),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                        letterSpacing: -0.3),
+                  ),
+                  Text(
+                    state.isLoading
                         ? 'Loading...'
-                        : '${state.media.length} media files',
-                theme: theme,
+                        : state.isSearchMode
+                            ? '${state.searchResults.length} results'
+                            : '${state.media.length} files',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
               ),
         actions: [
-          // Search toggle
           IconButton(
-            icon: Icon(
-              _isSearchBarVisible ? Icons.close_rounded : Icons.search_rounded,
-            ),
-            tooltip: _isSearchBarVisible ? 'Close search' : 'Search files',
+            icon: Icon(_isSearchBarVisible
+                ? Icons.close_rounded
+                : Icons.search_rounded),
             onPressed: _toggleSearch,
           ),
-          // Download all visible media
-          if (filteredMedia.isNotEmpty && !_isSearchBarVisible)
+          if (media.isNotEmpty && !_isSearchBarVisible)
             IconButton(
               icon: const Icon(Icons.download_for_offline_rounded),
-              tooltip: 'Add all to queue',
-              onPressed: () => _addAllToQueue(context, ref, filteredMedia),
+              tooltip: 'Queue all visible',
+              onPressed: () => _addAllToQueue(context, media),
             ),
         ],
       ),
       body: Column(
         children: [
-          // ── Search mode indicator ─────────────────────────
-          if (state.isSearchMode && !_isSearchBarVisible)
-            _SearchIndicator(
+          // ── Type filter bar (server-side) ─────────────────
+          _FilterBar(
+            activeFilter: state.activeFilter,
+            onFilterChanged: (type) =>
+                ref.read(chatMediaControllerProvider(_config).notifier).setFilter(type),
+          ),
+
+          // ── Search active indicator ───────────────────────
+          if (state.isSearchMode)
+            _SearchBanner(
               query: state.searchQuery,
-              resultCount: state.searchResults.length,
+              count: state.searchResults.length,
               onClear: () {
                 _searchController.clear();
-                ref
-                    .read(
-                        chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-                    .clearSearch();
+                ref.read(chatMediaControllerProvider(_config).notifier).clearSearch();
               },
             ),
 
-          // ── Filter chips ──────────────────────────────────
-          _FilterBar(
-            selectedType: _filterType,
-            mediaCounts: _countByType(displayMedia),
-            onSelected: (type) => setState(() {
-              _filterType = _filterType == type ? null : type;
-            }),
-          ),
-
-          // ── Media list ────────────────────────────────────
-          Expanded(
-            child: _buildList(state, filteredMedia, isLoadingAny, theme),
-          ),
+          Expanded(child: _buildBody(state, media, isLoadingMore, theme)),
         ],
       ),
     );
   }
 
-  Widget _buildList(
+  Widget _buildBody(
     ChatMediaState state,
     List<MediaMessage> media,
     bool isLoadingMore,
     ThemeData theme,
   ) {
-    // Initial loading
-    if ((state.isLoading && state.media.isEmpty && !state.isSearchMode) ||
-        (state.isSearching && state.searchResults.isEmpty && state.isSearchMode)) {
+    if (state.isLoading && media.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    // Error
-    if (state.error.isNotEmpty && state.media.isEmpty && !state.isSearchMode) {
+    if (state.error.isNotEmpty && media.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -224,10 +198,8 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
                   style: theme.textTheme.bodySmall),
               const SizedBox(height: 24),
               FilledButton.icon(
-                onPressed: () => ref
-                    .read(
-                        chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-                    .loadMedia(),
+                onPressed: () =>
+                    ref.read(chatMediaControllerProvider(_config).notifier).loadMedia(),
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Retry'),
               ),
@@ -237,55 +209,36 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
       );
     }
 
-    // Empty
     if (media.isEmpty) {
-      final emptyText = state.isSearchMode
-          ? 'No media files matching "${state.searchQuery}"'
-          : _filterType != null
-              ? 'No ${_filterType!.name} files found'
-              : 'No media files in this chat';
-
       return RefreshIndicator(
-        onRefresh: () => ref
-            .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-            .reload(),
+        onRefresh: () =>
+            ref.read(chatMediaControllerProvider(_config).notifier).reload(),
         child: LayoutBuilder(
-          builder: (context, constraints) => ListView(
+          builder: (_, constraints) => ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             children: [
-              Container(
+              SizedBox(
                 height: constraints.maxHeight,
-                alignment: Alignment.center,
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
+                child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        state.isSearchMode
-                            ? Icons.search_off_rounded
-                            : Icons.perm_media_outlined,
-                        size: 56,
-                        color: theme.colorScheme.onSurface.withValues(alpha: 0.15),
-                      ),
+                      Icon(Icons.perm_media_outlined,
+                          size: 56,
+                          color: theme.colorScheme.onSurface
+                              .withValues(alpha: 0.15)),
                       const SizedBox(height: 16),
                       Text(
-                        emptyText,
-                        textAlign: TextAlign.center,
+                        state.activeFilter != null
+                            ? 'No ${state.activeFilter!.name} files found'
+                            : state.isSearchMode
+                                ? 'No results for "${state.searchQuery}"'
+                                : 'No media in this chat',
                         style: theme.textTheme.titleMedium?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                          color: theme.colorScheme.onSurface
+                              .withValues(alpha: 0.4),
                         ),
                       ),
-                      if (!state.isSearchMode) ...[
-                        const SizedBox(height: 24),
-                        FilledButton.icon(
-                          onPressed: () => ref
-                              .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-                              .reload(),
-                          icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Refresh'),
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -297,9 +250,8 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
     }
 
     return RefreshIndicator(
-      onRefresh: () => ref
-          .read(chatMediaControllerProvider(ChatMediaConfig(widget.chatId, widget.messageThreadId)).notifier)
-          .reload(),
+      onRefresh: () =>
+          ref.read(chatMediaControllerProvider(_config).notifier).reload(),
       child: ListView.separated(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
@@ -317,32 +269,33 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
               child: Center(child: CircularProgressIndicator()),
             );
           }
-          return MediaFileTile(media: media[index]);
+          return MediaFileTile(
+            media: media[index],
+            onPreview: () => _showPreview(context, media[index]),
+          );
         },
       ),
     );
   }
 
-  Map<MediaType, int> _countByType(List<MediaMessage> media) {
-    final counts = <MediaType, int>{};
-    for (final m in media) {
-      counts[m.mediaType] = (counts[m.mediaType] ?? 0) + 1;
-    }
-    return counts;
+  void _showPreview(BuildContext context, MediaMessage media) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => MediaPreviewSheet(media: media),
+    );
   }
 
   Future<void> _addAllToQueue(
-    BuildContext context,
-    WidgetRef ref,
-    List<MediaMessage> media,
-  ) async {
+      BuildContext context, List<MediaMessage> media) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add all to queue?'),
+        title: const Text('Queue all visible?'),
         content: Text(
-          'This will add ${media.length} files '
-          '(${formatBytes(media.fold(0, (sum, m) => sum + m.fileSize))}) '
+          'Add ${media.length} files '
+          '(${formatBytes(media.fold(0, (s, m) => s + m.fileSize))}) '
           'to the download queue.',
         ),
         actions: [
@@ -355,18 +308,15 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
         ],
       ),
     );
-
     if (confirmed != true || !context.mounted) return;
 
     final manager = ref.read(downloadManagerProvider);
     final appDir = await getApplicationDocumentsDirectory();
-
     int added = 0;
     for (final m in media) {
-      final localPath = '${appDir.path}/downloads/${m.fileName}';
       await manager.enqueue(DownloadItem(
         fileId: m.fileId,
-        localPath: localPath,
+        localPath: '${appDir.path}/downloads/${m.fileName}',
         totalSize: m.fileSize,
         fileName: m.fileName,
         chatId: m.chatId,
@@ -374,20 +324,118 @@ class _ChatMediaScreenState extends ConsumerState<ChatMediaScreen> {
       ));
       added++;
     }
-
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Added $added files to download queue'),
-          backgroundColor: const Color(0xFF2AABEE),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Added $added files to queue'),
+        backgroundColor: const Color(0xFF2AABEE),
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 }
 
-// ── Search text field ───────────────────────────────────────────
+// ── Filter bar ────────────────────────────────────────────────────
+
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
+    required this.activeFilter,
+    required this.onFilterChanged,
+  });
+
+  final MediaType? activeFilter;
+  final ValueChanged<MediaType?> onFilterChanged;
+
+  static const _filters = [
+    (null, 'All', Icons.apps_rounded),
+    (MediaType.video, 'Videos', Icons.movie_rounded),
+    (MediaType.audio, 'Audio', Icons.audiotrack_rounded),
+    (MediaType.photo, 'Photos', Icons.image_rounded),
+    (MediaType.document, 'Docs', Icons.insert_drive_file_rounded),
+    (MediaType.animation, 'GIFs', Icons.gif_rounded),
+    (MediaType.voiceNote, 'Voice', Icons.mic_rounded),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        children: _filters.map((f) {
+          final (type, label, icon) = f;
+          final selected = activeFilter == type;
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: FilterChip(
+              selected: selected,
+              avatar: Icon(icon,
+                  size: 14,
+                  color: selected
+                      ? Colors.white
+                      : theme.colorScheme.onSurfaceVariant),
+              label: Text(label,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: selected
+                          ? Colors.white
+                          : theme.colorScheme.onSurfaceVariant)),
+              selectedColor: const Color(0xFF2AABEE),
+              checkmarkColor: Colors.white,
+              showCheckmark: false,
+              backgroundColor: theme.colorScheme.surfaceContainerHigh,
+              side: BorderSide.none,
+              visualDensity: VisualDensity.compact,
+              onSelected: (_) => onFilterChanged(type),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ── Search banner ─────────────────────────────────────────────────
+
+class _SearchBanner extends StatelessWidget {
+  const _SearchBanner(
+      {required this.query, required this.count, required this.onClear});
+  final String query;
+  final int count;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      color: const Color(0xFF2AABEE).withValues(alpha: 0.08),
+      child: Row(
+        children: [
+          const Icon(Icons.search_rounded, size: 14, color: Color(0xFF2AABEE)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '$count results for "$query"',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: const Color(0xFF2AABEE)),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          GestureDetector(
+            onTap: onClear,
+            child: const Icon(Icons.close_rounded,
+                size: 14, color: Color(0xFF2AABEE)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Search text field ─────────────────────────────────────────────
 
 class _SearchField extends StatelessWidget {
   const _SearchField({
@@ -405,7 +453,6 @@ class _SearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
     return TextField(
       controller: controller,
       focusNode: focusNode,
@@ -414,8 +461,7 @@ class _SearchField extends StatelessWidget {
       decoration: InputDecoration(
         hintText: 'Search files...',
         hintStyle: theme.textTheme.bodyLarge?.copyWith(
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.35),
-        ),
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.35)),
         border: InputBorder.none,
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(vertical: 8),
@@ -429,157 +475,4 @@ class _SearchField extends StatelessWidget {
       ),
     );
   }
-}
-
-// ── Title column (default AppBar title) ─────────────────────────
-
-class _TitleColumn extends StatelessWidget {
-  const _TitleColumn({
-    required this.title,
-    required this.subtitle,
-    required this.theme,
-  });
-
-  final String title;
-  final String subtitle;
-  final ThemeData theme;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 16,
-            letterSpacing: -0.3,
-          ),
-        ),
-        Text(
-          subtitle,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-            fontSize: 11,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Search mode indicator chip ──────────────────────────────────
-
-class _SearchIndicator extends StatelessWidget {
-  const _SearchIndicator({
-    required this.query,
-    required this.resultCount,
-    required this.onClear,
-  });
-
-  final String query;
-  final int resultCount;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: const Color(0xFF2AABEE).withValues(alpha: 0.08),
-      child: Row(
-        children: [
-          const Icon(Icons.search_rounded, size: 16, color: Color(0xFF2AABEE)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '$resultCount results for "$query"',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF2AABEE),
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          GestureDetector(
-            onTap: onClear,
-            child: const Icon(
-              Icons.close_rounded,
-              size: 16,
-              color: Color(0xFF2AABEE),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Filter chip bar ─────────────────────────────────────────────
-
-class _FilterBar extends StatelessWidget {
-  const _FilterBar({
-    required this.selectedType,
-    required this.mediaCounts,
-    required this.onSelected,
-  });
-
-  final MediaType? selectedType;
-  final Map<MediaType, int> mediaCounts;
-  final void Function(MediaType) onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    if (mediaCounts.isEmpty) return const SizedBox.shrink();
-
-    final theme = Theme.of(context);
-
-    return SizedBox(
-      height: 48,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        children: [
-          for (final type in MediaType.values)
-            if (mediaCounts.containsKey(type))
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: FilterChip(
-                  selected: selectedType == type,
-                  label: Text(
-                    '${_chipLabel(type)} (${mediaCounts[type]})',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: selectedType == type
-                          ? theme.colorScheme.onPrimary
-                          : theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  selectedColor: const Color(0xFF2AABEE),
-                  checkmarkColor: Colors.white,
-                  backgroundColor:
-                      theme.colorScheme.surfaceContainerHigh,
-                  side: BorderSide.none,
-                  visualDensity: VisualDensity.compact,
-                  onSelected: (_) => onSelected(type),
-                ),
-              ),
-        ],
-      ),
-    );
-  }
-
-  String _chipLabel(MediaType type) => switch (type) {
-        MediaType.document => 'Docs',
-        MediaType.video => 'Videos',
-        MediaType.audio => 'Audio',
-        MediaType.photo => 'Photos',
-        MediaType.voiceNote => 'Voice',
-        MediaType.videoNote => 'V.Notes',
-        MediaType.animation => 'GIFs',
-      };
 }

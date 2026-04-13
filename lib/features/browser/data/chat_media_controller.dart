@@ -23,8 +23,21 @@ class ChatMediaConfig {
   int get hashCode => Object.hash(chatId, messageThreadId);
 }
 
+/// Maps our MediaType enum to TDLib's SearchMessagesFilter.
+/// Using TDLib filters means the server returns only the relevant type —
+/// no wasted bandwidth fetching text messages we discard.
+SearchMessagesFilter? _tdlibFilterFor(MediaType? type) => switch (type) {
+      MediaType.video => const SearchMessagesFilterVideo(),
+      MediaType.audio => const SearchMessagesFilterAudio(),
+      MediaType.photo => const SearchMessagesFilterPhoto(),
+      MediaType.document => const SearchMessagesFilterDocument(),
+      MediaType.voiceNote => const SearchMessagesFilterVoiceNote(),
+      MediaType.videoNote => const SearchMessagesFilterVideoNote(),
+      MediaType.animation => const SearchMessagesFilterAnimation(),
+      null => null, // null = all types, handled by GetChatHistory
+    };
+
 /// State for media messages in a specific chat.
-/// Supports both default history browsing and search mode.
 class ChatMediaState {
   const ChatMediaState({
     this.media = const [],
@@ -33,6 +46,7 @@ class ChatMediaState {
     this.hasMore = true,
     this.error = '',
     this.chatId = 0,
+    this.activeFilter,
     this.isSearchMode = false,
     this.searchQuery = '',
     this.searchResults = const [],
@@ -40,7 +54,6 @@ class ChatMediaState {
     this.searchHasMore = true,
   });
 
-  /// Default history media (preserved while searching).
   final List<MediaMessage> media;
   final bool isLoading;
   final bool isLoadingMore;
@@ -48,14 +61,15 @@ class ChatMediaState {
   final String error;
   final int chatId;
 
-  /// Search mode state.
+  /// Active type filter — when set, only this type is fetched from TDLib.
+  final MediaType? activeFilter;
+
   final bool isSearchMode;
   final String searchQuery;
   final List<MediaMessage> searchResults;
   final bool isSearching;
   final bool searchHasMore;
 
-  /// Active display list: search results when searching, history otherwise.
   List<MediaMessage> get displayMedia =>
       isSearchMode ? searchResults : media;
 
@@ -66,6 +80,7 @@ class ChatMediaState {
     bool? hasMore,
     String? error,
     int? chatId,
+    Object? activeFilter = _sentinel,
     bool? isSearchMode,
     String? searchQuery,
     List<MediaMessage>? searchResults,
@@ -79,6 +94,9 @@ class ChatMediaState {
         hasMore: hasMore ?? this.hasMore,
         error: error ?? this.error,
         chatId: chatId ?? this.chatId,
+        activeFilter: activeFilter == _sentinel
+            ? this.activeFilter
+            : activeFilter as MediaType?,
         isSearchMode: isSearchMode ?? this.isSearchMode,
         searchQuery: searchQuery ?? this.searchQuery,
         searchResults: searchResults ?? this.searchResults,
@@ -87,26 +105,23 @@ class ChatMediaState {
       );
 }
 
+// Sentinel for nullable copyWith fields.
+const _sentinel = Object();
+
 /// Family provider: one controller per config.
 final chatMediaControllerProvider = StateNotifierProvider.family.autoDispose<
     ChatMediaController, ChatMediaState, ChatMediaConfig>(
   (ref, config) => ChatMediaController(ref, config),
 );
 
-/// Fetches message history for a selected chat, filters to only
-/// messages containing downloadable media (document, video, audio, photo).
+/// Fetches media messages for a chat using TDLib's native type filters.
 ///
-/// Supports two modes:
-///   - **Default Mode**: Infinite-scroll history via `GetChatHistory`
-///   - **Search Mode**: Query-based results via `SearchChatMessages`
-///
-/// Clearing the search reverts instantly to the cached history state.
-///
-/// ## TDLib Cache Warmup
-/// On the first `GetChatHistory` call for a chat, TDLib may return an empty
-/// list because the local cache isn't populated yet — the server fetch is
-/// triggered in the background. The controller handles this by retrying once
-/// after a short delay, and by always allowing `loadMore()` after initial load.
+/// Key improvements over the previous implementation:
+/// - Uses `SearchMessagesFilter` so TDLib returns only the requested type
+///   (no wasted fetches of text messages that get discarded locally)
+/// - Filter changes trigger a fresh fetch from the server, not just local
+///   filtering of an already-loaded subset
+/// - Search uses the same filter so results are type-consistent
 class ChatMediaController extends StateNotifier<ChatMediaState> {
   ChatMediaController(this._ref, this._config)
       : super(ChatMediaState(chatId: _config.chatId));
@@ -117,104 +132,86 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
   int get _messageThreadId => _config.messageThreadId;
   static const int _pageSize = 50;
 
-  // ── History pagination state ─────────────────────────────────
   int _oldestMessageId = 0;
-
-  // ── Search pagination state ──────────────────────────────────
   int _searchOldestMessageId = 0;
+  bool _hasMoreAfterFetch = true;
 
-  // ══════════════════════════════════════════════════════════════
-  //  DEFAULT MODE — History browsing
-  // ══════════════════════════════════════════════════════════════
+  // ── Public API ───────────────────────────────────────────────
 
-  /// Force-reload media (used by pull-to-refresh).
   Future<void> reload() async {
-    state = state.copyWith(isLoading: false); // Reset guard
+    if (!mounted) return;
     _oldestMessageId = 0;
+    state = state.copyWith(isLoading: false, error: '');
     await loadMedia();
   }
 
-  /// Load the initial batch of media messages.
-  ///
-  /// Always sets [hasMore] = true after the first load so that
-  /// [loadMore] can be triggered even for chats where TDLib's cache
-  /// warmup caused the first page to be sparse.
   Future<void> loadMedia() async {
     if (state.isLoading) return;
     state = state.copyWith(isLoading: true, error: '');
     _oldestMessageId = 0;
 
     try {
-      final messages = await _fetchAndFilter(fromMessageId: 0);
+      final messages = await _fetchPage(fromMessageId: 0);
+      if (!mounted) return;
       state = state.copyWith(
         media: messages,
         isLoading: false,
-        // Always allow loadMore after first load — TDLib cache may have been
-        // empty on the first call, so we cannot trust an empty result as "done".
         hasMore: true,
       );
-
-      // If fewer than 3 media items were found, automatically try to load
-      // the next page. This covers the common case where TDLib's cache
-      // warmup returns nothing on the first call but has data immediately after.
+      // Auto-load next page if first batch was sparse (cache warmup).
       if (messages.length < 3 && mounted) {
         await loadMore();
       }
     } catch (e) {
       Log.error('Failed to load media', error: e, tag: 'CHAT_MEDIA');
+      if (!mounted) return;
       state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 
-  /// Load more (older) media messages for infinite scroll.
   Future<void> loadMore() async {
-    // In search mode, delegate to search pagination.
-    if (state.isSearchMode) {
-      return loadMoreSearch();
-    }
-
+    if (state.isSearchMode) return loadMoreSearch();
     if (state.isLoadingMore || !state.hasMore) return;
     state = state.copyWith(isLoadingMore: true);
 
     try {
-      final messages = await _fetchAndFilter(fromMessageId: _oldestMessageId);
-
-      if (messages.isEmpty) {
-        // Only mark as done if we also know the batch was short
-        // (i.e., TDLib returned fewer messages than requested).
-        // The _fetchAndFilter method sets _exhausted to communicate this.
-        state = state.copyWith(
-          isLoadingMore: false,
-          hasMore: _hasMoreAfterFetch,
-        );
-        return;
-      }
-
+      final messages = await _fetchPage(fromMessageId: _oldestMessageId);
+      if (!mounted) return;
       final existingIds = state.media.map((m) => m.messageId).toSet();
-      final newMedia =
+      final fresh =
           messages.where((m) => !existingIds.contains(m.messageId)).toList();
 
       state = state.copyWith(
-        media: [...state.media, ...newMedia],
+        media: [...state.media, ...fresh],
         isLoadingMore: false,
         hasMore: _hasMoreAfterFetch,
       );
     } catch (e) {
+      if (!mounted) return;
       state = state.copyWith(isLoadingMore: false);
     }
   }
 
-  // ══════════════════════════════════════════════════════════════
-  //  SEARCH MODE — TDLib searchChatMessages
-  // ══════════════════════════════════════════════════════════════
+  /// Switch the active type filter and reload from scratch.
+  Future<void> setFilter(MediaType? type) async {
+    if (state.activeFilter == type) return;
+    if (!mounted) return;
+    state = state.copyWith(
+      activeFilter: type,
+      media: [],
+      hasMore: true,
+      error: '',
+    );
+    _oldestMessageId = 0;
+    if (!mounted) return;
+    await loadMedia();
+  }
 
-  /// Execute a search query. Filters results to media-only.
+  // ── Search ───────────────────────────────────────────────────
+
   Future<void> searchMedia(String query) async {
     final trimmed = query.trim();
-    if (trimmed.isEmpty) {
-      clearSearch();
-      return;
-    }
+    if (trimmed.isEmpty) { clearSearch(); return; }
 
     _searchOldestMessageId = 0;
     state = state.copyWith(
@@ -226,11 +223,8 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
     );
 
     try {
-      final results = await _searchAndFilter(
-        query: trimmed,
-        fromMessageId: 0,
-      );
-
+      final results = await _searchPage(query: trimmed, fromMessageId: 0);
+      if (!mounted) return;
       state = state.copyWith(
         searchResults: results,
         isSearching: false,
@@ -238,48 +232,39 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
       );
     } catch (e) {
       Log.error('Search failed', error: e, tag: 'CHAT_MEDIA');
-      state = state.copyWith(
-        isSearching: false,
-        error: e.toString(),
-      );
+      if (!mounted) return;
+      state = state.copyWith(isSearching: false, error: e.toString());
     }
   }
 
-  /// Load more search results (pagination).
   Future<void> loadMoreSearch() async {
-    if (!state.isSearchMode || state.isSearching || !state.searchHasMore) {
-      return;
-    }
-
+    if (!state.isSearchMode || state.isSearching || !state.searchHasMore) return;
     state = state.copyWith(isSearching: true);
 
     try {
-      final results = await _searchAndFilter(
+      final results = await _searchPage(
         query: state.searchQuery,
         fromMessageId: _searchOldestMessageId,
       );
-
+      if (!mounted) return;
       if (results.isEmpty) {
         state = state.copyWith(isSearching: false, searchHasMore: false);
         return;
       }
-
-      final existingIds =
-          state.searchResults.map((m) => m.messageId).toSet();
-      final newResults =
+      final existingIds = state.searchResults.map((m) => m.messageId).toSet();
+      final fresh =
           results.where((m) => !existingIds.contains(m.messageId)).toList();
-
       state = state.copyWith(
-        searchResults: [...state.searchResults, ...newResults],
+        searchResults: [...state.searchResults, ...fresh],
         isSearching: false,
-        searchHasMore: newResults.isNotEmpty,
+        searchHasMore: fresh.isNotEmpty,
       );
     } catch (e) {
+      if (!mounted) return;
       state = state.copyWith(isSearching: false);
     }
   }
 
-  /// Clear search and revert to cached history instantly.
   void clearSearch() {
     state = state.copyWith(
       isSearchMode: false,
@@ -290,168 +275,147 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
     );
   }
 
-  // ══════════════════════════════════════════════════════════════
-  //  PRIVATE — Fetch helpers
-  // ══════════════════════════════════════════════════════════════
+  // ── Private fetch helpers ────────────────────────────────────
 
-  /// Tracks whether the last fetch hit the true end of history.
-  /// True = there may be more messages; False = TDLib returned a short batch.
-  bool _hasMoreAfterFetch = true;
-
-  /// Fetch history batches and filter for media.
+  /// Fetch one page of media using TDLib's native filter.
   ///
-  /// Retries once with a short delay if TDLib returns an empty list on the
-  /// first call, which happens when the local cache hasn't been warmed up yet.
-  Future<List<MediaMessage>> _fetchAndFilter({
-    required int fromMessageId,
-    int batchFetchCount = 20, // Increased to dig deeper through text-heavy threads
-  }) async {
+  /// When [activeFilter] is set, uses `SearchChatMessages` with the
+  /// corresponding `SearchMessagesFilter` — the server returns only that
+  /// type, so we never waste bandwidth fetching text messages.
+  ///
+  /// When no filter is set, uses `GetChatHistory` and discards non-media.
+  Future<List<MediaMessage>> _fetchPage({required int fromMessageId}) async {
     final send = _ref.read(tdlibSendProvider);
+    final filter = state.activeFilter;
+    final tdFilter = _tdlibFilterFor(filter);
     final collected = <MediaMessage>[];
 
-    int currentFromId = fromMessageId;
-    bool definitivelyExhausted = false;
+    // With a TDLib filter, one SearchChatMessages call returns only the
+    // relevant type — no need to loop through batches of text messages.
+    if (tdFilter != null || _messageThreadId != 0) {
+      // Use SearchChatMessages for filtered or threaded fetches.
+      final result = await send(SearchChatMessages(
+        chatId: _chatId,
+        query: '',
+        senderId: null,
+        fromMessageId: fromMessageId,
+        offset: 0,
+        limit: _pageSize,
+        filter: tdFilter,
+        messageThreadId: _messageThreadId,
+      ));
 
-    for (int batch = 0; batch < batchFetchCount; batch++) {
-      List<Message> msgs = [];
-      
-      if (_messageThreadId != 0) {
-        // Use SearchChatMessages with empty query to robustly fetch thread history.
-        // GetMessageThreadHistory often returns empty for uncached topics.
-        final result = await send(SearchChatMessages(
+      if (result is FoundChatMessages) {
+        for (final msg in result.messages) {
+          final media = MediaMessage.fromTdlibMessage(msg);
+          if (media != null) collected.add(media);
+        }
+        if (result.messages.isNotEmpty) {
+          _oldestMessageId = result.messages.last.id;
+        }
+        _hasMoreAfterFetch = result.messages.length >= _pageSize;
+      } else {
+        _hasMoreAfterFetch = false;
+      }
+
+      // Cache warmup retry for empty first-page results.
+      if (collected.isEmpty && fromMessageId == 0) {
+        await Future.delayed(const Duration(milliseconds: 1200));
+        final retry = await send(SearchChatMessages(
           chatId: _chatId,
           query: '',
           senderId: null,
-          fromMessageId: currentFromId,
+          fromMessageId: 0,
           offset: 0,
           limit: _pageSize,
-          filter: null, // all messages
+          filter: tdFilter,
           messageThreadId: _messageThreadId,
         ));
-        if (result is FoundChatMessages) {
-          msgs = result.messages;
-        } else {
-          break;
+        if (retry is FoundChatMessages) {
+          for (final msg in retry.messages) {
+            final media = MediaMessage.fromTdlibMessage(msg);
+            if (media != null) collected.add(media);
+          }
+          if (retry.messages.isNotEmpty) {
+            _oldestMessageId = retry.messages.last.id;
+          }
+          _hasMoreAfterFetch = retry.messages.length >= _pageSize;
         }
-      } else {
-        final result = await send(GetChatHistory(
+      }
+      return collected;
+    }
+
+    // No filter — use GetChatHistory and filter locally.
+    // Loop up to 20 batches to find enough media in text-heavy chats.
+    int currentFromId = fromMessageId;
+    bool exhausted = false;
+
+    for (int batch = 0; batch < 20; batch++) {
+      final result = await send(GetChatHistory(
+        chatId: _chatId,
+        fromMessageId: currentFromId,
+        offset: 0,
+        limit: _pageSize,
+        onlyLocal: false,
+      ));
+
+      if (result is! Messages) { exhausted = true; break; }
+      final msgs = result.messages;
+
+      // Cache warmup retry.
+      if (msgs.isEmpty && batch == 0 && currentFromId == 0) {
+        await Future.delayed(const Duration(milliseconds: 900));
+        final retry = await send(GetChatHistory(
           chatId: _chatId,
-          fromMessageId: currentFromId,
+          fromMessageId: 0,
           offset: 0,
           limit: _pageSize,
           onlyLocal: false,
         ));
-        if (result is Messages) {
-          msgs = result.messages;
-        } else {
-          break;
-        }
-      }
-
-      // ── TDLib Cache Warmup Retry ─────────────────────────────
-      // On the very first call (fromMessageId == 0), TDLib may return an
-      // empty list because the server fetch is still in progress in the
-      // background. Wait briefly and retry (more aggressively for topic threads).
-      if (msgs.isEmpty && batch == 0 && currentFromId == 0) {
-        final isThread = _messageThreadId != 0;
-        final maxRetries = isThread ? 5 : 1;
-        Log.info(
-          '${isThread ? "GetMessageThreadHistory" : "GetChatHistory"} returned empty on first call — retrying ($maxRetries attempts)',
-          tag: 'CHAT_MEDIA',
-        );
-        for (int retry = 0; retry < maxRetries; retry++) {
-          await Future.delayed(Duration(milliseconds: (isThread ? 1500 : 900) + (retry * 500)));
-
-          List<Message> retryMsgs = [];
-          if (isThread) {
-            final retryResult = await send(SearchChatMessages(
-              chatId: _chatId,
-              query: '',
-              senderId: null,
-              fromMessageId: 0,
-              offset: 0,
-              limit: _pageSize,
-              filter: null,
-              messageThreadId: _messageThreadId,
-            ));
-            if (retryResult is FoundChatMessages) retryMsgs = retryResult.messages;
-          } else {
-            final retryResult = await send(GetChatHistory(
-              chatId: _chatId,
-              fromMessageId: 0,
-              offset: 0,
-              limit: _pageSize,
-              onlyLocal: false,
-            ));
-            if (retryResult is Messages) retryMsgs = retryResult.messages;
+        if (retry is Messages && retry.messages.isNotEmpty) {
+          for (final msg in retry.messages) {
+            final media = MediaMessage.fromTdlibMessage(msg);
+            if (media != null) collected.add(media);
           }
-
-          if (retryMsgs.isNotEmpty) {
-            // Use retry result.
-            for (final msg in retryMsgs) {
-              final media = MediaMessage.fromTdlibMessage(msg);
-              if (media != null) collected.add(media);
-            }
-            _oldestMessageId = retryMsgs.last.id;
-            currentFromId = _oldestMessageId;
-
-            if (retryMsgs.length < _pageSize) {
-              definitivelyExhausted = true;
-            }
-            break; // Got data, stop retrying.
-          }
+          _oldestMessageId = retry.messages.last.id;
+          currentFromId = _oldestMessageId;
+          if (retry.messages.length < _pageSize) { exhausted = true; break; }
+          if (collected.length >= _pageSize) break;
+          continue;
         }
-
-        if (currentFromId == 0) {
-          // Genuinely empty (no messages returned from API) — allow another attempt later from UI refresh.
-          _hasMoreAfterFetch = true;
-          return collected;
-        }
-        if (definitivelyExhausted) break;
-        continue;
+        _hasMoreAfterFetch = true;
+        return collected;
       }
 
-      if (msgs.isEmpty) {
-        definitivelyExhausted = true;
-        break;
-      }
+      if (msgs.isEmpty) { exhausted = true; break; }
 
       for (final msg in msgs) {
         final media = MediaMessage.fromTdlibMessage(msg);
         if (media != null) collected.add(media);
       }
-
       _oldestMessageId = msgs.last.id;
       currentFromId = _oldestMessageId;
 
-      // A short batch means TDLib has no more history, but for topics it might
-      // just be a small locally populated chunk. Be conservative and only
-      // mark exhausted if we got strictly 0 messages.
-      if (msgs.isEmpty) {
-        definitivelyExhausted = true;
-        break;
-      }
-
-      // Stop fetching more batches once we have enough to display.
+      if (msgs.length < _pageSize) { exhausted = true; break; }
       if (collected.length >= _pageSize) break;
     }
 
-    _hasMoreAfterFetch = !definitivelyExhausted;
+    _hasMoreAfterFetch = !exhausted;
     return collected;
   }
 
-  /// Search messages and filter for media.
-  Future<List<MediaMessage>> _searchAndFilter({
+  /// Search with optional type filter.
+  Future<List<MediaMessage>> _searchPage({
     required String query,
     required int fromMessageId,
-    int batchFetchCount = 3,
   }) async {
     final send = _ref.read(tdlibSendProvider);
+    final tdFilter = _tdlibFilterFor(state.activeFilter);
     final collected = <MediaMessage>[];
 
+    // Fetch up to 3 batches to find enough media results.
     int currentFromId = fromMessageId;
-
-    for (int batch = 0; batch < batchFetchCount; batch++) {
+    for (int batch = 0; batch < 3; batch++) {
       final result = await send(SearchChatMessages(
         chatId: _chatId,
         query: query,
@@ -459,12 +423,11 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
         fromMessageId: currentFromId,
         offset: 0,
         limit: _pageSize,
-        filter: null, // Search across all message types, then filter locally
+        filter: tdFilter,
         messageThreadId: _messageThreadId,
       ));
 
       if (result is! FoundChatMessages) break;
-
       final msgs = result.messages;
       if (msgs.isEmpty) break;
 
@@ -472,7 +435,6 @@ class ChatMediaController extends StateNotifier<ChatMediaState> {
         final media = MediaMessage.fromTdlibMessage(msg);
         if (media != null) collected.add(media);
       }
-
       _searchOldestMessageId = msgs.last.id;
       currentFromId = _searchOldestMessageId;
 

@@ -16,6 +16,12 @@ class DownloadItem {
     this.createdAt,
     this.currentSpeed = 0,
     this.errorReason = '',
+    // ── New fields ──────────────────────────────────────────
+    this.retryCount = 0,
+    this.checksumMd5 = '',
+    this.speedLimitBps = 0,
+    this.scheduledAt,
+    this.mirrorChannelId = 0,
   });
 
   /// Auto-incremented row ID in SQLite (null before insertion).
@@ -56,8 +62,26 @@ class DownloadItem {
 
   /// Specific error reason (persisted in DB). Empty string = no error detail.
   /// Values: '', 'corrupted_archive', 'password_required',
-  ///         'unsupported_format', 'file_not_found', 'extraction_failed'.
+  ///         'unsupported_format', 'file_not_found', 'extraction_failed',
+  ///         'checksum_mismatch', 'max_retries_exceeded'.
   final String errorReason;
+
+  /// Number of automatic retry attempts made so far.
+  final int retryCount;
+
+  /// Expected MD5 checksum hex string (empty = no verification).
+  final String checksumMd5;
+
+  /// Per-file bandwidth cap in bytes/second (0 = use global setting).
+  final int speedLimitBps;
+
+  /// If set, the download will not start until this time.
+  final DateTime? scheduledAt;
+
+  /// If non-zero, this download was triggered by a channel mirror rule.
+  final int mirrorChannelId;
+
+  // ── Computed ─────────────────────────────────────────────────
 
   /// Progress as a fraction 0.0 – 1.0.
   double get progress =>
@@ -65,6 +89,10 @@ class DownloadItem {
 
   /// Whether the download is currently active.
   bool get isActive => status == DownloadStatus.downloading;
+
+  /// Whether this download is scheduled for a future time.
+  bool get isScheduled =>
+      scheduledAt != null && scheduledAt!.isAfter(DateTime.now());
 
   /// Estimated time remaining in seconds, or null if not downloading.
   int? get etaSeconds {
@@ -89,7 +117,11 @@ class DownloadItem {
         'message_id': messageId,
         'created_at': (createdAt ?? DateTime.now()).toIso8601String(),
         'error_reason': errorReason,
-        // currentSpeed is transient — not stored in DB.
+        'retry_count': retryCount,
+        'checksum_md5': checksumMd5,
+        'speed_limit_bps': speedLimitBps,
+        'scheduled_at': scheduledAt?.toIso8601String() ?? '',
+        'mirror_channel_id': mirrorChannelId,
       };
 
   factory DownloadItem.fromMap(Map<String, dynamic> map) => DownloadItem(
@@ -107,6 +139,13 @@ class DownloadItem {
             ? DateTime.tryParse(map['created_at'] as String)
             : null,
         errorReason: map['error_reason'] as String? ?? '',
+        retryCount: map['retry_count'] as int? ?? 0,
+        checksumMd5: map['checksum_md5'] as String? ?? '',
+        speedLimitBps: map['speed_limit_bps'] as int? ?? 0,
+        scheduledAt: (map['scheduled_at'] as String?)?.isNotEmpty == true
+            ? DateTime.tryParse(map['scheduled_at'] as String)
+            : null,
+        mirrorChannelId: map['mirror_channel_id'] as int? ?? 0,
       );
 
   DownloadItem copyWith({
@@ -123,6 +162,12 @@ class DownloadItem {
     DateTime? createdAt,
     int? currentSpeed,
     String? errorReason,
+    int? retryCount,
+    String? checksumMd5,
+    int? speedLimitBps,
+    DateTime? scheduledAt,
+    bool clearScheduledAt = false,
+    int? mirrorChannelId,
   }) =>
       DownloadItem(
         id: id ?? this.id,
@@ -138,10 +183,16 @@ class DownloadItem {
         createdAt: createdAt ?? this.createdAt,
         currentSpeed: currentSpeed ?? this.currentSpeed,
         errorReason: errorReason ?? this.errorReason,
+        retryCount: retryCount ?? this.retryCount,
+        checksumMd5: checksumMd5 ?? this.checksumMd5,
+        speedLimitBps: speedLimitBps ?? this.speedLimitBps,
+        scheduledAt: clearScheduledAt ? null : (scheduledAt ?? this.scheduledAt),
+        mirrorChannelId: mirrorChannelId ?? this.mirrorChannelId,
       );
 
   @override
   String toString() =>
       'DownloadItem(fileId: $fileId, status: ${status.name}, '
-      '$downloadedSize/$totalSize bytes, speed: ${currentSpeed}B/s)';
+      '$downloadedSize/$totalSize bytes, speed: ${currentSpeed}B/s, '
+      'retries: $retryCount)';
 }

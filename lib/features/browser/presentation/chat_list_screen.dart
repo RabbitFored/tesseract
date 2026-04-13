@@ -2,16 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/chat_list_controller.dart';
-//import '../domain/chat_item.dart';
 import 'chat_media_screen.dart';
 import 'topic_list_screen.dart';
 import 'widgets/chat_tile.dart';
 
-/// Screen showing the user's Telegram chats/channels.
-/// Tapping a chat navigates to [ChatMediaScreen].
-///
-/// Uses skeleton tiles while loading so the screen feels responsive
-/// even during the initial TDLib server fetch.
 class ChatListScreen extends ConsumerStatefulWidget {
   const ChatListScreen({super.key});
 
@@ -27,9 +21,8 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() {
-      ref.read(chatListControllerProvider.notifier).loadChats();
-    });
+    Future.microtask(
+        () => ref.read(chatListControllerProvider.notifier).loadChats());
     _scrollController.addListener(_onScroll);
   }
 
@@ -51,6 +44,7 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(chatListControllerProvider);
     final theme = Theme.of(context);
+    final notifier = ref.read(chatListControllerProvider.notifier);
 
     return Scaffold(
       appBar: AppBar(
@@ -61,47 +55,46 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
                 decoration: InputDecoration(
                   hintText: 'Search chats...',
                   border: InputBorder.none,
-                  hintStyle: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                  hintStyle:
+                      TextStyle(color: theme.colorScheme.onSurfaceVariant),
                 ),
-                onChanged: (val) {
-                  ref.read(chatListControllerProvider.notifier).searchChats(val);
-                },
+                onChanged: notifier.searchChats,
               )
-            : const Text(
-                'Browse Chats',
-                style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -0.5),
-              ),
+            : const Text('Browse Chats',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, letterSpacing: -0.5)),
         centerTitle: false,
         actions: [
           IconButton(
             icon: Icon(
-              state.mediaOnly ? Icons.filter_alt_rounded : Icons.filter_alt_outlined,
-              color: state.mediaOnly ? theme.colorScheme.primary : null,
+              _isSearching ? Icons.close_rounded : Icons.search_rounded,
             ),
-            tooltip: 'Show Media Only',
-            onPressed: () => ref.read(chatListControllerProvider.notifier).toggleMediaOnly(),
-          ),
-          IconButton(
-            icon: Icon(_isSearching ? Icons.close_rounded : Icons.search_rounded),
-            tooltip: 'Search Chats',
             onPressed: () {
-              setState(() {
-                _isSearching = !_isSearching;
-                if (!_isSearching) {
-                  _searchController.clear();
-                  ref.read(chatListControllerProvider.notifier).clearSearch();
-                }
-              });
+              setState(() => _isSearching = !_isSearching);
+              if (!_isSearching) {
+                _searchController.clear();
+                notifier.clearSearch();
+              }
             },
           ),
         ],
       ),
-      body: _buildBody(state, theme),
+      body: Column(
+        children: [
+          // ── Chat type filter bar ──────────────────────────
+          _ChatFilterBar(
+            activeFilter: state.chatTypeFilter,
+            mediaOnly: state.mediaOnly,
+            onFilterChanged: notifier.setChatTypeFilter,
+            onMediaOnlyToggled: notifier.toggleMediaOnly,
+          ),
+          Expanded(child: _buildBody(state, theme)),
+        ],
+      ),
     );
   }
 
   Widget _buildBody(ChatListState state, ThemeData theme) {
-    // Show skeletons when we are loading and have nothing to show yet.
     if (state.isLoading && state.displayChats.isEmpty && !_isSearching) {
       return _SkeletonChatList(theme: theme);
     }
@@ -113,28 +106,20 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.error_outline_rounded,
-                size: 48,
-                color: theme.colorScheme.error,
-              ),
+              Icon(Icons.error_outline_rounded,
+                  size: 48, color: theme.colorScheme.error),
               const SizedBox(height: 16),
-              Text(
-                'Failed to load chats',
-                style: theme.textTheme.titleMedium,
-              ),
+              Text('Failed to load chats',
+                  style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
-              Text(
-                state.error,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
+              Text(state.error,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall),
               const SizedBox(height: 24),
               FilledButton.icon(
-                onPressed: () =>
-                    ref.read(chatListControllerProvider.notifier).loadChats(forceRefresh: true),
+                onPressed: () => ref
+                    .read(chatListControllerProvider.notifier)
+                    .loadChats(forceRefresh: true),
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Retry'),
               ),
@@ -149,21 +134,18 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-             if (state.isSearching) ...[
-                const CircularProgressIndicator(),
-                const SizedBox(height: 16),
-             ] else
-               Icon(
-                 Icons.chat_bubble_outline_rounded,
-                 size: 56,
-                 color: theme.colorScheme.onSurface.withValues(alpha: 0.15),
-               ),
+            if (state.isSearching) ...[
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+            ] else
+              Icon(Icons.chat_bubble_outline_rounded,
+                  size: 56,
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.15)),
             const SizedBox(height: 16),
             Text(
-              state.isSearching && state.isSearchMode ? 'Searching...' : 'No chats found',
+              state.isSearching ? 'Searching...' : 'No chats found',
               style: theme.textTheme.titleMedium?.copyWith(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
-              ),
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.4)),
             ),
           ],
         ),
@@ -171,8 +153,9 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
     }
 
     return RefreshIndicator(
-      onRefresh: () =>
-          ref.read(chatListControllerProvider.notifier).loadChats(forceRefresh: true),
+      onRefresh: () => ref
+          .read(chatListControllerProvider.notifier)
+          .loadChats(forceRefresh: true),
       child: ListView.separated(
         controller: _scrollController,
         physics: const AlwaysScrollableScrollPhysics(),
@@ -186,35 +169,100 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
           if (index >= state.displayChats.length) {
             return _SkeletonChatTile(theme: theme);
           }
-
           final chat = state.displayChats[index];
           return ChatTile(
             chat: chat,
             onTap: () {
               if (chat.isForum) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => TopicListScreen(
-                      chatId: chat.id,
-                      chatTitle: chat.title,
-                    ),
-                  ),
-                );
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => TopicListScreen(
+                      chatId: chat.id, chatTitle: chat.title),
+                ));
               } else {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => ChatMediaScreen(
-                      chatId: chat.id,
-                      chatTitle: chat.title,
-                    ),
-                  ),
-                );
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => ChatMediaScreen(
+                      chatId: chat.id, chatTitle: chat.title),
+                ));
               }
             },
           );
         },
+      ),
+    );
+  }
+}
+
+// ── Chat filter bar ───────────────────────────────────────────────
+
+class _ChatFilterBar extends StatelessWidget {
+  const _ChatFilterBar({
+    required this.activeFilter,
+    required this.mediaOnly,
+    required this.onFilterChanged,
+    required this.onMediaOnlyToggled,
+  });
+
+  final ChatTypeFilter activeFilter;
+  final bool mediaOnly;
+  final ValueChanged<ChatTypeFilter> onFilterChanged;
+  final VoidCallback onMediaOnlyToggled;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SizedBox(
+      height: 44,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        children: [
+          // Type filters
+          for (final f in ChatTypeFilter.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: FilterChip(
+                selected: activeFilter == f,
+                label: Text(f.label,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: activeFilter == f
+                            ? Colors.white
+                            : theme.colorScheme.onSurfaceVariant)),
+                selectedColor: const Color(0xFF2AABEE),
+                checkmarkColor: Colors.white,
+                showCheckmark: false,
+                backgroundColor: theme.colorScheme.surfaceContainerHigh,
+                side: BorderSide.none,
+                visualDensity: VisualDensity.compact,
+                onSelected: (_) => onFilterChanged(f),
+              ),
+            ),
+          // Media-only toggle
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: FilterChip(
+              selected: mediaOnly,
+              avatar: Icon(Icons.perm_media_outlined,
+                  size: 14,
+                  color: mediaOnly
+                      ? Colors.white
+                      : theme.colorScheme.onSurfaceVariant),
+              label: Text('Media',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: mediaOnly
+                          ? Colors.white
+                          : theme.colorScheme.onSurfaceVariant)),
+              selectedColor: const Color(0xFFAB47BC),
+              checkmarkColor: Colors.white,
+              showCheckmark: false,
+              backgroundColor: theme.colorScheme.surfaceContainerHigh,
+              side: BorderSide.none,
+              visualDensity: VisualDensity.compact,
+              onSelected: (_) => onMediaOnlyToggled(),
+            ),
+          ),
+        ],
       ),
     );
   }

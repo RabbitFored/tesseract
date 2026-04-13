@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +16,38 @@ abstract final class _Keys {
   static const wifiOnly = 'wifi_only';
   static const pauseOnLowBattery = 'pause_on_low_battery';
   static const autoExtractArchives = 'auto_extract_archives';
+  static const customDownloadPath = 'custom_download_path';
+  // Bandwidth
+  static const globalSpeedLimitBps = 'global_speed_limit_bps';
+  // Retry
+  static const maxAutoRetries = 'max_auto_retries';
+  static const retryBackoffBaseSeconds = 'retry_backoff_base_seconds';
+  // Checksum
+  static const verifyChecksums = 'verify_checksums';
+  // Scheduling
+  static const downloadOnlyOnSchedule = 'download_only_on_schedule';
+  static const scheduleStartHour = 'schedule_start_hour';
+  static const scheduleEndHour = 'schedule_end_hour';
+  static const allowCellularForSmallFilesMb = 'allow_cellular_small_mb';
+  // Thermal & battery
+  static const pauseOnHighThermal = 'pause_on_high_thermal';
+  static const lowBatteryThresholdPct = 'low_battery_threshold_pct';
+  static const chargingOnlyMode = 'charging_only_mode';
+  // Proxy
+  static const proxyEnabled = 'proxy_enabled';
+  static const proxyType = 'proxy_type';
+  static const proxyHost = 'proxy_host';
+  static const proxyPort = 'proxy_port';
+  static const proxyUsername = 'proxy_username';
+  static const proxyPassword = 'proxy_password';
+  static const proxySecret = 'proxy_secret';
+  // Auto-cleanup
+  static const autoCleanupEnabled = 'auto_cleanup_enabled';
+  static const autoCleanupAfterDays = 'auto_cleanup_after_days';
+  static const autoCleanupMinFreeMb = 'auto_cleanup_min_free_mb';
+  static const autoCleanupKeepFavorites = 'auto_cleanup_keep_favorites';
+  // Mirror rules
+  static const mirrorRules = 'mirror_rules_json';
 }
 
 /// Global settings provider.
@@ -34,31 +67,65 @@ class SettingsController extends Notifier<SettingsState> {
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
 
-    // Resolve platform-appropriate default download path.
-    final basePath = _prefs?.getString('custom_download_path') ??
+    final basePath = _prefs?.getString(_Keys.customDownloadPath) ??
         await _resolveDefaultDownloadPath();
 
+    final mirrorJson = _prefs?.getString(_Keys.mirrorRules);
+    final mirrors = _parseMirrorRules(mirrorJson);
+
     state = SettingsState(
-      concurrentDownloads:
-          _prefs?.getInt(_Keys.concurrentDownloads) ?? 3,
+      concurrentDownloads: _prefs?.getInt(_Keys.concurrentDownloads) ?? 3,
       isDarkMode: _prefs?.getBool(_Keys.isDarkMode) ?? true,
-      smartCategorization:
-          _prefs?.getBool(_Keys.smartCategorization) ?? false,
+      smartCategorization: _prefs?.getBool(_Keys.smartCategorization) ?? false,
       downloadBasePath: basePath,
       wifiOnly: _prefs?.getBool(_Keys.wifiOnly) ?? false,
-      pauseOnLowBattery:
-          _prefs?.getBool(_Keys.pauseOnLowBattery) ?? false,
-      autoExtractArchives:
-          _prefs?.getBool(_Keys.autoExtractArchives) ?? false,
+      pauseOnLowBattery: _prefs?.getBool(_Keys.pauseOnLowBattery) ?? false,
+      autoExtractArchives: _prefs?.getBool(_Keys.autoExtractArchives) ?? false,
+      globalSpeedLimitBps: _prefs?.getInt(_Keys.globalSpeedLimitBps) ?? 0,
+      maxAutoRetries: _prefs?.getInt(_Keys.maxAutoRetries) ?? 5,
+      retryBackoffBaseSeconds:
+          _prefs?.getInt(_Keys.retryBackoffBaseSeconds) ?? 5,
+      verifyChecksums: _prefs?.getBool(_Keys.verifyChecksums) ?? false,
+      downloadOnlyOnSchedule:
+          _prefs?.getBool(_Keys.downloadOnlyOnSchedule) ?? false,
+      scheduleStartHour: _prefs?.getInt(_Keys.scheduleStartHour) ?? 2,
+      scheduleEndHour: _prefs?.getInt(_Keys.scheduleEndHour) ?? 6,
+      allowCellularForSmallFilesMb:
+          _prefs?.getInt(_Keys.allowCellularForSmallFilesMb) ?? 0,
+      pauseOnHighThermal: _prefs?.getBool(_Keys.pauseOnHighThermal) ?? false,
+      lowBatteryThresholdPct:
+          _prefs?.getInt(_Keys.lowBatteryThresholdPct) ?? 15,
+      chargingOnlyMode: _prefs?.getBool(_Keys.chargingOnlyMode) ?? false,
+      proxyEnabled: _prefs?.getBool(_Keys.proxyEnabled) ?? false,
+      proxyType: ProxyType.values.firstWhere(
+        (t) => t.name == (_prefs?.getString(_Keys.proxyType) ?? 'none'),
+        orElse: () => ProxyType.none,
+      ),
+      proxyHost: _prefs?.getString(_Keys.proxyHost) ?? '',
+      proxyPort: _prefs?.getInt(_Keys.proxyPort) ?? 1080,
+      proxyUsername: _prefs?.getString(_Keys.proxyUsername) ?? '',
+      proxyPassword: _prefs?.getString(_Keys.proxyPassword) ?? '',
+      proxySecret: _prefs?.getString(_Keys.proxySecret) ?? '',
+      autoCleanupEnabled: _prefs?.getBool(_Keys.autoCleanupEnabled) ?? false,
+      autoCleanupAfterDays: _prefs?.getInt(_Keys.autoCleanupAfterDays) ?? 30,
+      autoCleanupMinFreeMb: _prefs?.getInt(_Keys.autoCleanupMinFreeMb) ?? 500,
+      autoCleanupKeepFavorites:
+          _prefs?.getBool(_Keys.autoCleanupKeepFavorites) ?? true,
+      mirrorRules: mirrors,
     );
 
     Log.info(
       'Settings loaded: concurrent=${state.concurrentDownloads}, '
       'dark=${state.isDarkMode}, wifi=${state.wifiOnly}, '
-      'lowBat=${state.pauseOnLowBattery}, extract=${state.autoExtractArchives}',
+      'lowBat=${state.pauseOnLowBattery}, extract=${state.autoExtractArchives}, '
+      'speedLimit=${state.globalSpeedLimitBps}B/s, '
+      'proxy=${state.proxyEnabled}(${state.proxyType.name}), '
+      'mirrors=${state.mirrorRules.length}',
       tag: 'SETTINGS',
     );
   }
+
+  // ── Core setters ──────────────────────────────────────────────
 
   Future<void> setConcurrentDownloads(int value) async {
     final clamped = value.clamp(1, 5);
@@ -91,6 +158,178 @@ class SettingsController extends Notifier<SettingsState> {
     state = state.copyWith(autoExtractArchives: enabled);
   }
 
+  Future<void> setDownloadPath(String path) async {
+    await _prefs?.setString(_Keys.customDownloadPath, path);
+    state = state.copyWith(downloadBasePath: path);
+  }
+
+  // ── Bandwidth ─────────────────────────────────────────────────
+
+  Future<void> setGlobalSpeedLimit(int bps) async {
+    final clamped = bps < 0 ? 0 : bps;
+    await _prefs?.setInt(_Keys.globalSpeedLimitBps, clamped);
+    state = state.copyWith(globalSpeedLimitBps: clamped);
+  }
+
+  // ── Retry ─────────────────────────────────────────────────────
+
+  Future<void> setMaxAutoRetries(int value) async {
+    final clamped = value.clamp(0, 20);
+    await _prefs?.setInt(_Keys.maxAutoRetries, clamped);
+    state = state.copyWith(maxAutoRetries: clamped);
+  }
+
+  Future<void> setRetryBackoffBase(int seconds) async {
+    final clamped = seconds.clamp(1, 60);
+    await _prefs?.setInt(_Keys.retryBackoffBaseSeconds, clamped);
+    state = state.copyWith(retryBackoffBaseSeconds: clamped);
+  }
+
+  // ── Checksum ──────────────────────────────────────────────────
+
+  Future<void> setVerifyChecksums(bool enabled) async {
+    await _prefs?.setBool(_Keys.verifyChecksums, enabled);
+    state = state.copyWith(verifyChecksums: enabled);
+  }
+
+  // ── Scheduling ────────────────────────────────────────────────
+
+  Future<void> setDownloadOnlyOnSchedule(bool enabled) async {
+    await _prefs?.setBool(_Keys.downloadOnlyOnSchedule, enabled);
+    state = state.copyWith(downloadOnlyOnSchedule: enabled);
+  }
+
+  Future<void> setScheduleWindow(int startHour, int endHour) async {
+    await _prefs?.setInt(_Keys.scheduleStartHour, startHour.clamp(0, 23));
+    await _prefs?.setInt(_Keys.scheduleEndHour, endHour.clamp(0, 23));
+    state = state.copyWith(
+      scheduleStartHour: startHour.clamp(0, 23),
+      scheduleEndHour: endHour.clamp(0, 23),
+    );
+  }
+
+  Future<void> setAllowCellularForSmallFiles(int mb) async {
+    await _prefs?.setInt(_Keys.allowCellularForSmallFilesMb, mb.clamp(0, 1000));
+    state = state.copyWith(allowCellularForSmallFilesMb: mb.clamp(0, 1000));
+  }
+
+  // ── Thermal & battery ─────────────────────────────────────────
+
+  Future<void> setPauseOnHighThermal(bool enabled) async {
+    await _prefs?.setBool(_Keys.pauseOnHighThermal, enabled);
+    state = state.copyWith(pauseOnHighThermal: enabled);
+  }
+
+  Future<void> setLowBatteryThreshold(int pct) async {
+    final clamped = pct.clamp(5, 50);
+    await _prefs?.setInt(_Keys.lowBatteryThresholdPct, clamped);
+    state = state.copyWith(lowBatteryThresholdPct: clamped);
+  }
+
+  Future<void> setChargingOnlyMode(bool enabled) async {
+    await _prefs?.setBool(_Keys.chargingOnlyMode, enabled);
+    state = state.copyWith(chargingOnlyMode: enabled);
+  }
+
+  // ── Proxy ─────────────────────────────────────────────────────
+
+  Future<void> setProxyEnabled(bool enabled) async {
+    await _prefs?.setBool(_Keys.proxyEnabled, enabled);
+    state = state.copyWith(proxyEnabled: enabled);
+  }
+
+  Future<void> setProxyConfig({
+    required ProxyType type,
+    required String host,
+    required int port,
+    String username = '',
+    String password = '',
+    String secret = '',
+  }) async {
+    await _prefs?.setString(_Keys.proxyType, type.name);
+    await _prefs?.setString(_Keys.proxyHost, host);
+    await _prefs?.setInt(_Keys.proxyPort, port);
+    await _prefs?.setString(_Keys.proxyUsername, username);
+    await _prefs?.setString(_Keys.proxyPassword, password);
+    await _prefs?.setString(_Keys.proxySecret, secret);
+    state = state.copyWith(
+      proxyType: type,
+      proxyHost: host,
+      proxyPort: port,
+      proxyUsername: username,
+      proxyPassword: password,
+      proxySecret: secret,
+    );
+  }
+
+  // ── Auto-cleanup ──────────────────────────────────────────────
+
+  Future<void> setAutoCleanupEnabled(bool enabled) async {
+    await _prefs?.setBool(_Keys.autoCleanupEnabled, enabled);
+    state = state.copyWith(autoCleanupEnabled: enabled);
+  }
+
+  Future<void> setAutoCleanupAfterDays(int days) async {
+    final clamped = days.clamp(1, 365);
+    await _prefs?.setInt(_Keys.autoCleanupAfterDays, clamped);
+    state = state.copyWith(autoCleanupAfterDays: clamped);
+  }
+
+  Future<void> setAutoCleanupMinFreeMb(int mb) async {
+    final clamped = mb.clamp(0, 10000);
+    await _prefs?.setInt(_Keys.autoCleanupMinFreeMb, clamped);
+    state = state.copyWith(autoCleanupMinFreeMb: clamped);
+  }
+
+  Future<void> setAutoCleanupKeepFavorites(bool keep) async {
+    await _prefs?.setBool(_Keys.autoCleanupKeepFavorites, keep);
+    state = state.copyWith(autoCleanupKeepFavorites: keep);
+  }
+
+  // ── Mirror rules ──────────────────────────────────────────────
+
+  Future<void> addMirrorRule(MirrorRule rule) async {
+    final updated = [...state.mirrorRules, rule];
+    await _saveMirrorRules(updated);
+    state = state.copyWith(mirrorRules: updated);
+  }
+
+  Future<void> updateMirrorRule(int index, MirrorRule rule) async {
+    final updated = [...state.mirrorRules];
+    if (index < 0 || index >= updated.length) return;
+    updated[index] = rule;
+    await _saveMirrorRules(updated);
+    state = state.copyWith(mirrorRules: updated);
+  }
+
+  Future<void> removeMirrorRule(int index) async {
+    final updated = [...state.mirrorRules];
+    if (index < 0 || index >= updated.length) return;
+    updated.removeAt(index);
+    await _saveMirrorRules(updated);
+    state = state.copyWith(mirrorRules: updated);
+  }
+
+  Future<void> _saveMirrorRules(List<MirrorRule> rules) async {
+    final json = jsonEncode(rules.map((r) => r.toJson()).toList());
+    await _prefs?.setString(_Keys.mirrorRules, json);
+  }
+
+  List<MirrorRule> _parseMirrorRules(String? json) {
+    if (json == null || json.isEmpty) return const [];
+    try {
+      final list = jsonDecode(json) as List<dynamic>;
+      return list
+          .map((e) => MirrorRule.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      Log.error('Failed to parse mirror rules: $e', tag: 'SETTINGS');
+      return const [];
+    }
+  }
+
+  // ── Path helpers ──────────────────────────────────────────────
+
   String resolveDownloadPath(String fileName) {
     final sep = Platform.pathSeparator;
     if (state.smartCategorization) {
@@ -100,23 +339,16 @@ class SettingsController extends Notifier<SettingsState> {
     return '${state.downloadBasePath}$sep$fileName';
   }
 
-  Future<void> setDownloadPath(String path) async {
-    await _prefs?.setString('custom_download_path', path);
-    state = state.copyWith(downloadBasePath: path);
-  }
-
   /// Returns a platform-appropriate default download directory.
   static Future<String> _resolveDefaultDownloadPath() async {
     final sep = Platform.pathSeparator;
     if (Platform.isAndroid) {
       return '/storage/emulated/0/Download/Tesseract';
     }
-    // Windows, macOS, Linux — use the system Downloads directory.
     try {
       final dir = await getDownloadsDirectory();
       if (dir != null) return '${dir.path}${sep}Tesseract';
     } catch (_) {}
-    // Fallback to app documents directory.
     final appDir = await getApplicationDocumentsDirectory();
     return '${appDir.path}${sep}Tesseract';
   }

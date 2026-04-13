@@ -82,17 +82,20 @@ class ErrorBadgeStyle {
         'unsupported_format' => 'Unsupported Format',
         'file_not_found' => 'File Not Found',
         'extraction_failed' => 'Extraction Failed',
+        'checksum_mismatch' => 'Checksum Mismatch',
+        'max_retries_exceeded' => 'Max Retries',
         _ => 'Error',
       };
 
   /// Return a contextual color for the error badge.
-  /// Corrupted = red, Password = orange, others = default red.
   static Color colorFor(String errorReason) => switch (errorReason) {
         'corrupted_archive' => const Color(0xFFFF1744),
         'password_required' => const Color(0xFFFF9100),
         'unsupported_format' => const Color(0xFF78909C),
         'file_not_found' => const Color(0xFF78909C),
         'extraction_failed' => const Color(0xFFFF1744),
+        'checksum_mismatch' => const Color(0xFFFF6D00),
+        'max_retries_exceeded' => const Color(0xFFFF1744),
         _ => const Color(0xFFFF1744),
       };
 
@@ -103,8 +106,54 @@ class ErrorBadgeStyle {
         'unsupported_format' => Icons.block_rounded,
         'file_not_found' => Icons.find_in_page_rounded,
         'extraction_failed' => Icons.error_outline_rounded,
+        'checksum_mismatch' => Icons.verified_outlined,
+        'max_retries_exceeded' => Icons.replay_circle_filled_rounded,
         _ => Icons.error_outline_rounded,
       };
+}
+
+/// Sanitize a string that may contain invalid UTF-16 surrogate pairs
+/// (common in Telegram file names). Flutter's text renderer crashes on
+/// unpaired surrogates — replace them with the replacement character U+FFFD.
+String sanitizeText(String s) {
+  // Fast path: most strings are clean.
+  bool hasInvalid = false;
+  for (int i = 0; i < s.length; i++) {
+    final c = s.codeUnitAt(i);
+    if (c >= 0xD800 && c <= 0xDFFF) {
+      // Surrogate range — check if it's a valid pair.
+      if (c <= 0xDBFF && i + 1 < s.length) {
+        final next = s.codeUnitAt(i + 1);
+        if (next >= 0xDC00 && next <= 0xDFFF) {
+          i++; // valid surrogate pair, skip both
+          continue;
+        }
+      }
+      hasInvalid = true;
+      break;
+    }
+  }
+  if (!hasInvalid) return s;
+
+  final buf = StringBuffer();
+  for (int i = 0; i < s.length; i++) {
+    final c = s.codeUnitAt(i);
+    if (c >= 0xD800 && c <= 0xDFFF) {
+      if (c <= 0xDBFF && i + 1 < s.length) {
+        final next = s.codeUnitAt(i + 1);
+        if (next >= 0xDC00 && next <= 0xDFFF) {
+          buf.writeCharCode(
+              0x10000 + ((c - 0xD800) << 10) + (next - 0xDC00));
+          i++;
+          continue;
+        }
+      }
+      buf.writeCharCode(0xFFFD); // replacement character
+    } else {
+      buf.writeCharCode(c);
+    }
+  }
+  return buf.toString();
 }
 
 /// Format bytes into human-readable strings.

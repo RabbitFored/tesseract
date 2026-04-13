@@ -55,6 +55,15 @@ dependencies:
   archive: ^3.6.1
   file_picker: ^10.3.10
   sqflite_common_ffi: ^2.4.0+2
+  # Cryptographic hashing for checksum verification
+  crypto: ^3.0.3
+  # Media preview
+  video_player: ^2.9.2
+  chewie: ^1.8.5
+  cached_network_image: ^3.4.1
+  just_audio: ^0.9.42
+  # Windows/Linux video player support (extends video_player to all desktop platforms)
+  fvp: ^0.35.2
 
 dev_dependencies:
   flutter_test:

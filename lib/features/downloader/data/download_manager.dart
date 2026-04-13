@@ -12,13 +12,16 @@ import '../../../core/tdlib/tdlib_client.dart';
 import '../../../core/tdlib/tdlib_provider.dart';
 import '../../../core/utils/logger.dart';
 import '../../settings/data/settings_controller.dart';
-import '../../settings/domain/settings_state.dart';
+import '../../settings/domain/settings_state.dart' as app_settings;
 import '../../browser/domain/media_message.dart';
 import '../domain/download_item.dart';
 import '../domain/download_status.dart';
 import 'background_service.dart';
+import 'checksum_service.dart';
+import 'cleanup_service.dart';
 import 'download_db.dart';
 import 'extraction_service.dart';
+import 'mirror_controller.dart';
 import 'resource_monitor.dart';
 import 'speed_tracker.dart';
 
@@ -34,13 +37,16 @@ class DownloadManager {
     _db = DownloadDb();
     _speed = SpeedTracker();
     _resourceMonitor = ResourceMonitor(_ref);
+    _mirror = MirrorController(_ref);
   }
 
   final Ref _ref;
   late final DownloadDb _db;
   late final SpeedTracker _speed;
   late final ResourceMonitor _resourceMonitor;
+  late final MirrorController _mirror;
   StreamSubscription<TdObject>? _tdlibSub;
+  Timer? _schedulePoller;
   bool _initialized = false;
   bool _disposed = false;
 
@@ -60,7 +66,6 @@ class DownloadManager {
     if (_initialized) return;
     _initialized = true;
 
-    // Bug 1 fix: Request storage permissions upfront on Android.
     if (Platform.isAndroid) {
       await _ensureStoragePermissions();
     }
@@ -68,13 +73,30 @@ class DownloadManager {
     await _db.database;
     await _db.resetStaleDownloads();
 
-    // Wire resource monitor callbacks.
     _resourceMonitor.onConstraintViolated = _onResourceViolated;
     _resourceMonitor.onConstraintRestored = _onResourceRestored;
     await _resourceMonitor.start();
 
+    // Apply proxy if configured.
+    final settings = _ref.read(settingsControllerProvider);
+    if (settings.proxyEnabled) {
+      await _applyProxy(settings);
+    }
+
     final client = _ref.read(tdlibClientProvider);
     _tdlibSub = client.updates.listen(_onTdlibUpdate);
+
+    // Start channel mirror listener.
+    _mirror.start();
+
+    // Poll for scheduled downloads every minute.
+    _schedulePoller = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _processScheduledItems(),
+    );
+
+    // Run auto-cleanup on startup if enabled.
+    await _runAutoCleanupIfNeeded();
 
     await _processQueue();
     Log.info('DownloadManager initialized (max=$_maxConcurrent)',
@@ -84,9 +106,11 @@ class DownloadManager {
   void dispose() {
     _disposed = true;
     _tdlibSub?.cancel();
+    _schedulePoller?.cancel();
     _queueChanged.close();
     _speed.dispose();
     _resourceMonitor.dispose();
+    _mirror.dispose();
     _db.close();
   }
 
@@ -117,6 +141,65 @@ class DownloadManager {
   void _onResourceRestored(String reason) {
     Log.info('Resource restored: $reason — resuming', tag: 'DL_MGR');
     resumeAll();
+  }
+
+  // ── Proxy ────────────────────────────────────────────────────
+
+  Future<void> _applyProxy(app_settings.SettingsState settings) async {
+    final send = _ref.read(tdlibSendProvider);
+    try {
+      // First disable all existing proxies.
+      final proxies = await send(const GetProxies());
+      if (proxies is Proxies) {
+        for (final p in proxies.proxies) {
+          await send(RemoveProxy(proxyId: p.id));
+        }
+      }
+
+      if (!settings.proxyEnabled ||
+          settings.proxyHost.isEmpty ||
+          settings.proxyType == app_settings.ProxyType.none) {
+        return;
+      }
+
+      switch (settings.proxyType) {
+        case app_settings.ProxyType.socks5:
+          await send(AddProxy(
+            server: settings.proxyHost,
+            port: settings.proxyPort,
+            enable: true,
+            type: ProxyTypeSocks5(
+              username: settings.proxyUsername,
+              password: settings.proxyPassword,
+            ),
+          ));
+          Log.info(
+            'SOCKS5 proxy applied: ${settings.proxyHost}:${settings.proxyPort}',
+            tag: 'DL_MGR',
+          );
+        case app_settings.ProxyType.mtproto:
+          await send(AddProxy(
+            server: settings.proxyHost,
+            port: settings.proxyPort,
+            enable: true,
+            type: ProxyTypeMtproto(secret: settings.proxySecret),
+          ));
+          Log.info(
+            'MTProto proxy applied: ${settings.proxyHost}:${settings.proxyPort}',
+            tag: 'DL_MGR',
+          );
+        case app_settings.ProxyType.none:
+          break;
+      }
+    } catch (e) {
+      Log.error('Failed to apply proxy: $e', tag: 'DL_MGR');
+    }
+  }
+
+  /// Re-apply proxy settings (called when settings change).
+  Future<void> reapplyProxy() async {
+    final settings = _ref.read(settingsControllerProvider);
+    await _applyProxy(settings);
   }
 
   // ── App lifecycle hooks ──────────────────────────────────────
@@ -159,20 +242,20 @@ class DownloadManager {
     _speed.reportProgress(file.id, downloadedSize);
     _speed.computeSpeed(file.id, downloadedSize);
 
-    // Fix Pause Bug: If the user currently set the item to paused, but TDLib is still processing the cancellation
-    // (local.isDownloadingActive is true), we must not overwrite our paused status back to downloading.
     var newStatus = item.status;
     if (isComplete) {
       newStatus = DownloadStatus.completed;
     } else if (item.status != DownloadStatus.paused && item.status != DownloadStatus.error) {
-      // If TDLib natively stops the download stream (network drop, disconnected), flag it as error.
-      newStatus = local.isDownloadingActive
-          ? DownloadStatus.downloading
-          : DownloadStatus.error;
+      if (local.isDownloadingActive) {
+        newStatus = DownloadStatus.downloading;
+      } else {
+        // Network drop or unexpected stop — schedule auto-retry.
+        newStatus = DownloadStatus.error;
+        _scheduleAutoRetry(item);
+      }
     }
 
     if (isComplete && local.path.isNotEmpty) {
-      // Update both progress AND the actual local path from TDLib.
       await _db.updateProgressAndPath(
         file.id,
         downloadedSize: downloadedSize,
@@ -194,8 +277,9 @@ class DownloadManager {
       Log.tdlib('Download complete: fileId=${file.id} path=${local.path}');
       _speed.removeFile(file.id);
 
-      // Copy the file to the user-accessible Downloads folder and update DB.
       final publicPath = await _exportCompletedFile(item, local.path);
+      final finalPath = publicPath ?? local.path;
+
       if (publicPath != null) {
         await _db.updateProgressAndPath(
           item.fileId,
@@ -203,10 +287,14 @@ class DownloadManager {
           status: DownloadStatus.completed,
           localPath: publicPath,
         );
-        // Also pass publicPath to auto-extractor so it extracts to the correct base.
-        await _autoExtractIfNeeded(item, publicPath);
+      }
+
+      // Checksum verification.
+      final settings = _ref.read(settingsControllerProvider);
+      if (settings.verifyChecksums && item.checksumMd5.isNotEmpty) {
+        await _verifyChecksum(item, finalPath);
       } else {
-        await _autoExtractIfNeeded(item, local.path);
+        await _autoExtractIfNeeded(item, finalPath);
       }
 
       await _processQueue();
@@ -216,8 +304,115 @@ class DownloadManager {
       if (remaining == 0 && queued == 0) {
         _speed.stop();
         await BackgroundDownloadService.stop();
+        await _runAutoCleanupIfNeeded();
       }
     }
+  }
+
+  // ── Checksum verification ────────────────────────────────────
+
+  Future<void> _verifyChecksum(DownloadItem item, String filePath) async {
+    Log.info('Verifying checksum for ${item.fileName}', tag: 'DL_MGR');
+    await _db.updateStatusWithReason(
+        item.fileId, DownloadStatus.extracting, '');
+    _notifyChange();
+
+    final ok = await ChecksumService.verifyMd5(filePath, item.checksumMd5);
+
+    if (ok) {
+      Log.info('Checksum OK for ${item.fileName}', tag: 'DL_MGR');
+      await _db.updateStatusWithReason(
+          item.fileId, DownloadStatus.completed, '');
+      await _autoExtractIfNeeded(item, filePath);
+    } else {
+      Log.error('Checksum MISMATCH for ${item.fileName}', tag: 'DL_MGR');
+      await _db.updateStatusWithReason(
+          item.fileId, DownloadStatus.error, 'checksum_mismatch');
+    }
+    _notifyChange();
+  }
+
+  // ── Auto-retry with exponential backoff ──────────────────────
+
+  void _scheduleAutoRetry(DownloadItem item) {
+    final settings = _ref.read(settingsControllerProvider);
+    if (settings.maxAutoRetries <= 0) return;
+    if (item.retryCount >= settings.maxAutoRetries) {
+      Log.info(
+        'Max retries (${settings.maxAutoRetries}) reached for ${item.fileName}',
+        tag: 'DL_MGR',
+      );
+      _db.updateStatusWithReason(
+          item.fileId, DownloadStatus.error, 'max_retries_exceeded');
+      _notifyChange();
+      return;
+    }
+
+    // Exponential backoff: base * 2^retryCount seconds.
+    final delaySeconds =
+        settings.retryBackoffBaseSeconds * (1 << item.retryCount);
+    final capped = delaySeconds.clamp(1, 300); // max 5 minutes
+
+    Log.info(
+      'Auto-retry ${item.retryCount + 1}/${settings.maxAutoRetries} '
+      'for ${item.fileName} in ${capped}s',
+      tag: 'DL_MGR',
+    );
+
+    Timer(Duration(seconds: capped), () async {
+      if (_disposed) return;
+      await _db.incrementRetryCount(item.fileId);
+      await retryDownload(item.fileId);
+    });
+  }
+
+  // ── Scheduled downloads ──────────────────────────────────────
+
+  Future<void> _processScheduledItems() async {
+    final due = await _db.getDueScheduledItems();
+    for (final item in due) {
+      // Clear the scheduled_at so it won't be picked up again.
+      await _db.updateStatus(item.fileId, DownloadStatus.queued);
+    }
+    if (due.isNotEmpty) {
+      _notifyChange();
+      await _processQueue();
+    }
+  }
+
+  // ── Auto-cleanup ─────────────────────────────────────────────
+
+  Future<void> _runAutoCleanupIfNeeded() async {
+    final settings = _ref.read(settingsControllerProvider);
+    if (!settings.autoCleanupEnabled) return;
+
+    final result = await CleanupService.run(
+      db: _db,
+      afterDays: settings.autoCleanupAfterDays,
+      minFreeMb: settings.autoCleanupMinFreeMb,
+    );
+
+    if (result.deletedCount > 0) {
+      Log.info(
+        'Auto-cleanup: removed ${result.deletedCount} files, '
+        'freed ${result.freedBytes ~/ 1024}KB',
+        tag: 'DL_MGR',
+      );
+      _notifyChange();
+    }
+  }
+
+  /// Manually trigger a cleanup pass.
+  Future<CleanupResult> runCleanupNow({Set<int> keepFileIds = const {}}) async {
+    final settings = _ref.read(settingsControllerProvider);
+    final result = await CleanupService.run(
+      db: _db,
+      afterDays: settings.autoCleanupAfterDays,
+      minFreeMb: settings.autoCleanupMinFreeMb,
+      keepFileIds: keepFileIds,
+    );
+    _notifyChange();
+    return result;
   }
 
   // ── Public API ───────────────────────────────────────────────
@@ -340,18 +535,25 @@ class DownloadManager {
   }
 
   Future<void> downloadFile(int fileId) async {
-    // Check resource constraints.
     if (_resourceMonitor.isPausedByResource) return;
+    final settings = _ref.read(settingsControllerProvider);
+    if (!settings.isWithinSchedule) return;
 
     final send = _ref.read(tdlibSendProvider);
     await _db.updateStatus(fileId, DownloadStatus.downloading);
     _notifyChange();
-
     _speed.start();
+
+    // TDLib priority 1–32. We use 32 (max) for user-initiated downloads.
+    // Background/mirror downloads use lower priority so user downloads
+    // always get bandwidth first. There is no TDLib API for a hard speed
+    // cap — priority is the only native throttle mechanism available.
+    final item = await _db.getByFileId(fileId);
+    final priority = item?.mirrorChannelId != 0 ? 1 : 32;
 
     final result = await send(DownloadFile(
       fileId: fileId,
-      priority: 32, // 32 is the highest priority in TDLib
+      priority: priority,
       offset: 0,
       limit: 0,
       synchronous: false,
@@ -363,6 +565,19 @@ class DownloadManager {
       await BackgroundDownloadService.start();
       _pushProgressToService();
     }
+  }
+
+  /// Update global bandwidth throttle limit.
+  /// NOTE: TDLib has no native speed-cap API. This updates the setting
+  /// for display purposes; actual throttling is not possible without
+  /// causing TCP session drops. Use concurrent download count to limit
+  /// overall bandwidth usage instead.
+  void updateSpeedLimit(int bps) {
+    Log.info(
+      'Speed limit setting: ${bps == 0 ? "unlimited" : "${bps ~/ 1024}KB/s"} '
+      '(display only — use concurrent downloads to limit bandwidth)',
+      tag: 'DL_MGR',
+    );
   }
 
   Future<void> pauseDownload(int fileId) async {
@@ -390,15 +605,10 @@ class DownloadManager {
 
     final send = _ref.read(tdlibSendProvider);
     await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
-    // Purge the heavily corrupted chunk from the native TDLib cache so it stops 
-    // instantly bottlenecking any internal resume attempts.
     await send(DeleteFile(fileId: fileId));
 
     int currentFileId = fileId;
 
-    // Because DeleteFile structurally invalidated the original `fileId` integer,
-    // we must dynamically rebuild the File cache map and fetch the new `fileId`
-    // using the immutable chat & message signature.
     if (item.chatId != 0 && item.messageId != 0) {
       try {
         final messageResult = await send(GetMessage(
@@ -409,7 +619,6 @@ class DownloadManager {
         if (messageResult is Message) {
           final media = MediaMessage.fromTdlibMessage(messageResult);
           if (media != null && media.fileId != currentFileId) {
-            // Hot-swap the primary key in our SQLite database instantly
             await _db.migrateFileId(oldFileId: currentFileId, newFileId: media.fileId);
             currentFileId = media.fileId;
           }
@@ -419,7 +628,6 @@ class DownloadManager {
       }
     }
 
-    // Reset progress, error state, and re-queue using the dynamically resolved file marker.
     await _db.resetForRetry(currentFileId);
     _speed.removeFile(currentFileId);
     _notifyChange();
@@ -428,9 +636,23 @@ class DownloadManager {
     await _processQueue();
   }
 
+  /// Manual retry — resets the retry counter so the user gets fresh attempts.
+  Future<void> manualRetry(int fileId) async {
+    await _db.resetRetryCount(fileId);
+    await retryDownload(fileId);
+  }
+
   Future<void> setPriority(int fileId, int priority) async {
     await _db.updatePriority(fileId, priority);
     _notifyChange();
+  }
+
+  /// Set a per-file bandwidth cap.
+  /// NOTE: TDLib has no safe speed-cap API — this is a no-op kept for
+  /// API compatibility. Use concurrent download count to limit bandwidth.
+  void setFileSpeedLimit(int fileId, int bps) {
+    Log.info('setFileSpeedLimit: no-op (TDLib has no safe speed-cap API)',
+        tag: 'DL_MGR');
   }
 
   Future<void> removeFromQueue(int fileId) async {
@@ -441,7 +663,6 @@ class DownloadManager {
         await send(CancelDownloadFile(fileId: fileId, onlyIfPending: false));
         _speed.removeFile(fileId);
       }
-      // Delete from TDLib completely to prevent "sticky" completion on re-add
       await send(DeleteFile(fileId: fileId));
     }
     await _db.delete(fileId);
@@ -490,6 +711,13 @@ class DownloadManager {
 
   Future<void> _processQueue() async {
     if (_resourceMonitor.isPausedByResource) return;
+
+    // Respect the download schedule.
+    final settings = _ref.read(settingsControllerProvider);
+    if (!settings.isWithinSchedule) {
+      Log.info('Outside schedule window — queue paused', tag: 'DL_MGR');
+      return;
+    }
 
     final activeCount = await _db.activeCount();
     final slotsAvailable = _maxConcurrent - activeCount;
@@ -575,7 +803,7 @@ class DownloadManager {
       DownloadItem item, String sourcePath) async {
     final settings = _ref.read(settingsControllerProvider);
     if (!settings.autoExtractArchives) return;
-    if (!SettingsState.isArchive(item.fileName)) return;
+    if (!app_settings.SettingsState.isArchive(item.fileName)) return;
     if (sourcePath.isEmpty) return;
 
     // Mark as extracting in DB — UI shows indeterminate progress.

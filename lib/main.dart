@@ -5,6 +5,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fvp/fvp.dart' as fvp;
 
 import 'app.dart';
 import 'core/constants/app_constants.dart';
@@ -19,14 +20,19 @@ const String kBackgroundPortName = 'tg_downloader_bg_port';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppConstants.initialize();
+
+  // Register fvp as the video_player backend for Windows & Linux.
+  // On Android/iOS the official video_player implementation is used.
+  // fvp uses libmdk with hardware-accelerated decoding (D3D11 on Windows).
+  fvp.registerWith(options: {
+    'platforms': ['windows', 'linux', 'macos'],
+  });
+
   if (Platform.isAndroid || Platform.isIOS) {
     _registerMainPort();
   }
 
-  // runApp immediately — all heavy init happens inside the widget tree.
-  runApp(
-    const _AppBootstrap(),
-  );
+  runApp(const _AppBootstrap());
 }
 
 void _registerMainPort() {

@@ -8,28 +8,124 @@ class SettingsState {
     this.wifiOnly = false,
     this.pauseOnLowBattery = false,
     this.autoExtractArchives = false,
+    // ── Bandwidth throttling ──────────────────────────────
+    this.globalSpeedLimitBps = 0,
+    // ── Retry / connection recovery ───────────────────────
+    this.maxAutoRetries = 5,
+    this.retryBackoffBaseSeconds = 5,
+    // ── Checksum verification ─────────────────────────────
+    this.verifyChecksums = false,
+    // ── Scheduling & network rules ────────────────────────
+    this.downloadOnlyOnSchedule = false,
+    this.scheduleStartHour = 2,
+    this.scheduleEndHour = 6,
+    this.allowCellularForSmallFilesMb = 0,
+    // ── Thermal & battery ─────────────────────────────────
+    this.pauseOnHighThermal = false,
+    this.lowBatteryThresholdPct = 15,
+    this.chargingOnlyMode = false,
+    // ── Proxy ─────────────────────────────────────────────
+    this.proxyEnabled = false,
+    this.proxyType = ProxyType.none,
+    this.proxyHost = '',
+    this.proxyPort = 1080,
+    this.proxyUsername = '',
+    this.proxyPassword = '',
+    this.proxySecret = '',
+    // ── Auto-cleanup ──────────────────────────────────────
+    this.autoCleanupEnabled = false,
+    this.autoCleanupAfterDays = 30,
+    this.autoCleanupMinFreeMb = 500,
+    this.autoCleanupKeepFavorites = true,
+    // ── Channel mirroring ─────────────────────────────────
+    this.mirrorRules = const [],
   });
 
-  /// Max concurrent TDLib downloads (1–5).
+  // ── Core ──────────────────────────────────────────────────────
   final int concurrentDownloads;
-
-  /// Dark or Light theme.
   final bool isDarkMode;
-
-  /// Auto-organize completed files into type-based sub-folders.
   final bool smartCategorization;
-
-  /// Base download directory (resolved at runtime).
   final String downloadBasePath;
-
-  /// Only download when connected to Wi-Fi.
   final bool wifiOnly;
-
-  /// Auto-pause all downloads when battery drops below 15%.
   final bool pauseOnLowBattery;
-
-  /// Auto-extract ZIP/RAR files after download completion.
   final bool autoExtractArchives;
+
+  // ── Bandwidth throttling ──────────────────────────────────────
+  /// Global download speed cap in bytes/second. 0 = unlimited.
+  final int globalSpeedLimitBps;
+
+  // ── Retry / connection recovery ───────────────────────────────
+  /// Maximum number of automatic retries before marking as failed.
+  final int maxAutoRetries;
+
+  /// Base delay in seconds for exponential backoff (delay = base * 2^attempt).
+  final int retryBackoffBaseSeconds;
+
+  // ── Checksum verification ─────────────────────────────────────
+  /// Verify MD5 checksum after download completes (when available).
+  final bool verifyChecksums;
+
+  // ── Scheduling & network rules ────────────────────────────────
+  /// Only download during the scheduled time window.
+  final bool downloadOnlyOnSchedule;
+
+  /// Start hour (0–23) of the allowed download window.
+  final int scheduleStartHour;
+
+  /// End hour (0–23) of the allowed download window.
+  final int scheduleEndHour;
+
+  /// Allow cellular downloads for files smaller than this (MB). 0 = never.
+  final int allowCellularForSmallFilesMb;
+
+  // ── Thermal & battery ─────────────────────────────────────────
+  /// Pause downloads when device reports high thermal state.
+  final bool pauseOnHighThermal;
+
+  /// Battery percentage below which downloads pause (default 15%).
+  final int lowBatteryThresholdPct;
+
+  /// Only download when the device is charging.
+  final bool chargingOnlyMode;
+
+  // ── Proxy ─────────────────────────────────────────────────────
+  final bool proxyEnabled;
+  final ProxyType proxyType;
+  final String proxyHost;
+  final int proxyPort;
+  final String proxyUsername;
+  final String proxyPassword;
+
+  /// MTProto proxy secret (hex string).
+  final String proxySecret;
+
+  // ── Auto-cleanup ──────────────────────────────────────────────
+  final bool autoCleanupEnabled;
+
+  /// Delete completed downloads older than this many days.
+  final int autoCleanupAfterDays;
+
+  /// Trigger cleanup when free storage drops below this (MB).
+  final int autoCleanupMinFreeMb;
+
+  /// Never auto-delete files marked as favorites.
+  final bool autoCleanupKeepFavorites;
+
+  // ── Channel mirroring ─────────────────────────────────────────
+  final List<MirrorRule> mirrorRules;
+
+  // ── Helpers ───────────────────────────────────────────────────
+
+  /// Whether the current time falls within the scheduled download window.
+  bool get isWithinSchedule {
+    if (!downloadOnlyOnSchedule) return true;
+    final now = DateTime.now().hour;
+    if (scheduleStartHour <= scheduleEndHour) {
+      return now >= scheduleStartHour && now < scheduleEndHour;
+    }
+    // Overnight window (e.g. 22:00 – 06:00).
+    return now >= scheduleStartHour || now < scheduleEndHour;
+  }
 
   SettingsState copyWith({
     int? concurrentDownloads,
@@ -39,6 +135,29 @@ class SettingsState {
     bool? wifiOnly,
     bool? pauseOnLowBattery,
     bool? autoExtractArchives,
+    int? globalSpeedLimitBps,
+    int? maxAutoRetries,
+    int? retryBackoffBaseSeconds,
+    bool? verifyChecksums,
+    bool? downloadOnlyOnSchedule,
+    int? scheduleStartHour,
+    int? scheduleEndHour,
+    int? allowCellularForSmallFilesMb,
+    bool? pauseOnHighThermal,
+    int? lowBatteryThresholdPct,
+    bool? chargingOnlyMode,
+    bool? proxyEnabled,
+    ProxyType? proxyType,
+    String? proxyHost,
+    int? proxyPort,
+    String? proxyUsername,
+    String? proxyPassword,
+    String? proxySecret,
+    bool? autoCleanupEnabled,
+    int? autoCleanupAfterDays,
+    int? autoCleanupMinFreeMb,
+    bool? autoCleanupKeepFavorites,
+    List<MirrorRule>? mirrorRules,
   }) =>
       SettingsState(
         concurrentDownloads: concurrentDownloads ?? this.concurrentDownloads,
@@ -48,6 +167,34 @@ class SettingsState {
         wifiOnly: wifiOnly ?? this.wifiOnly,
         pauseOnLowBattery: pauseOnLowBattery ?? this.pauseOnLowBattery,
         autoExtractArchives: autoExtractArchives ?? this.autoExtractArchives,
+        globalSpeedLimitBps: globalSpeedLimitBps ?? this.globalSpeedLimitBps,
+        maxAutoRetries: maxAutoRetries ?? this.maxAutoRetries,
+        retryBackoffBaseSeconds:
+            retryBackoffBaseSeconds ?? this.retryBackoffBaseSeconds,
+        verifyChecksums: verifyChecksums ?? this.verifyChecksums,
+        downloadOnlyOnSchedule:
+            downloadOnlyOnSchedule ?? this.downloadOnlyOnSchedule,
+        scheduleStartHour: scheduleStartHour ?? this.scheduleStartHour,
+        scheduleEndHour: scheduleEndHour ?? this.scheduleEndHour,
+        allowCellularForSmallFilesMb:
+            allowCellularForSmallFilesMb ?? this.allowCellularForSmallFilesMb,
+        pauseOnHighThermal: pauseOnHighThermal ?? this.pauseOnHighThermal,
+        lowBatteryThresholdPct:
+            lowBatteryThresholdPct ?? this.lowBatteryThresholdPct,
+        chargingOnlyMode: chargingOnlyMode ?? this.chargingOnlyMode,
+        proxyEnabled: proxyEnabled ?? this.proxyEnabled,
+        proxyType: proxyType ?? this.proxyType,
+        proxyHost: proxyHost ?? this.proxyHost,
+        proxyPort: proxyPort ?? this.proxyPort,
+        proxyUsername: proxyUsername ?? this.proxyUsername,
+        proxyPassword: proxyPassword ?? this.proxyPassword,
+        proxySecret: proxySecret ?? this.proxySecret,
+        autoCleanupEnabled: autoCleanupEnabled ?? this.autoCleanupEnabled,
+        autoCleanupAfterDays: autoCleanupAfterDays ?? this.autoCleanupAfterDays,
+        autoCleanupMinFreeMb: autoCleanupMinFreeMb ?? this.autoCleanupMinFreeMb,
+        autoCleanupKeepFavorites:
+            autoCleanupKeepFavorites ?? this.autoCleanupKeepFavorites,
+        mirrorRules: mirrorRules ?? this.mirrorRules,
       );
 
   /// Map file extension to a categorized sub-folder name.
@@ -77,4 +224,92 @@ class SettingsState {
     final ext = fileName.substring(dot + 1).toLowerCase();
     return ext == 'zip' || ext == 'tar' || ext == 'gz';
   }
+
+  /// Check if a file is streamable media.
+  static bool isStreamable(String fileName) {
+    final dot = fileName.lastIndexOf('.');
+    if (dot == -1) return false;
+    final ext = fileName.substring(dot + 1).toLowerCase();
+    return ext == 'mp4' ||
+        ext == 'mkv' ||
+        ext == 'webm' ||
+        ext == 'mp3' ||
+        ext == 'aac' ||
+        ext == 'm4a' ||
+        ext == 'ogg';
+  }
+}
+
+// ── Proxy type ────────────────────────────────────────────────────
+
+enum ProxyType { none, socks5, mtproto }
+
+// ── Mirror rule ───────────────────────────────────────────────────
+
+/// A rule that mirrors all new media from a Telegram channel to a local folder.
+class MirrorRule {
+  const MirrorRule({
+    required this.channelId,
+    required this.channelTitle,
+    required this.localFolder,
+    this.enabled = true,
+    this.filterExtensions = const [],
+    this.minFileSizeBytes = 0,
+    this.maxFileSizeBytes = 0,
+  });
+
+  final int channelId;
+  final String channelTitle;
+  final String localFolder;
+  final bool enabled;
+
+  /// If non-empty, only mirror files with these extensions.
+  final List<String> filterExtensions;
+
+  /// Minimum file size to mirror (0 = no minimum).
+  final int minFileSizeBytes;
+
+  /// Maximum file size to mirror (0 = no maximum).
+  final int maxFileSizeBytes;
+
+  MirrorRule copyWith({
+    int? channelId,
+    String? channelTitle,
+    String? localFolder,
+    bool? enabled,
+    List<String>? filterExtensions,
+    int? minFileSizeBytes,
+    int? maxFileSizeBytes,
+  }) =>
+      MirrorRule(
+        channelId: channelId ?? this.channelId,
+        channelTitle: channelTitle ?? this.channelTitle,
+        localFolder: localFolder ?? this.localFolder,
+        enabled: enabled ?? this.enabled,
+        filterExtensions: filterExtensions ?? this.filterExtensions,
+        minFileSizeBytes: minFileSizeBytes ?? this.minFileSizeBytes,
+        maxFileSizeBytes: maxFileSizeBytes ?? this.maxFileSizeBytes,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'channelId': channelId,
+        'channelTitle': channelTitle,
+        'localFolder': localFolder,
+        'enabled': enabled,
+        'filterExtensions': filterExtensions,
+        'minFileSizeBytes': minFileSizeBytes,
+        'maxFileSizeBytes': maxFileSizeBytes,
+      };
+
+  factory MirrorRule.fromJson(Map<String, dynamic> json) => MirrorRule(
+        channelId: json['channelId'] as int,
+        channelTitle: json['channelTitle'] as String? ?? '',
+        localFolder: json['localFolder'] as String,
+        enabled: json['enabled'] as bool? ?? true,
+        filterExtensions: (json['filterExtensions'] as List<dynamic>?)
+                ?.cast<String>() ??
+            const [],
+        minFileSizeBytes: json['minFileSizeBytes'] as int? ?? 0,
+        maxFileSizeBytes: json['maxFileSizeBytes'] as int? ?? 0,
+      );
 }
