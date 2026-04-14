@@ -1,16 +1,25 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:file_picker/file_picker.dart';
 
+import '../../../downloader/data/download_manager.dart';
 import '../../data/settings_controller.dart';
 import '../../domain/settings_state.dart';
 
 /// Screen for managing channel mirror rules.
-class MirrorRulesScreen extends ConsumerWidget {
+class MirrorRulesScreen extends ConsumerStatefulWidget {
   const MirrorRulesScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MirrorRulesScreen> createState() => _MirrorRulesScreenState();
+}
+
+class _MirrorRulesScreenState extends ConsumerState<MirrorRulesScreen> {
+  bool _syncing = false;
+  String? _syncResult;
+
+  @override
+  Widget build(BuildContext context) {
     final settings = ref.watch(settingsControllerProvider);
     final controller = ref.read(settingsControllerProvider.notifier);
     final theme = Theme.of(context);
@@ -22,6 +31,22 @@ class MirrorRulesScreen extends ConsumerWidget {
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         actions: [
+          // Global sync button — backfills all enabled rules.
+          if (settings.mirrorRules.any((r) => r.enabled))
+            _syncing
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.sync_rounded),
+                    tooltip: 'Sync now — backfill historical messages',
+                    onPressed: () => _runSync(context),
+                  ),
           IconButton(
             icon: const Icon(Icons.add_rounded),
             tooltip: 'Add mirror rule',
@@ -29,59 +54,141 @@ class MirrorRulesScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: settings.mirrorRules.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.sync_disabled_rounded,
-                      size: 64,
-                      color: theme.colorScheme.onSurfaceVariant
-                          .withValues(alpha: 0.4)),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No mirror rules',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+      body: Column(
+        children: [
+          // Sync result banner.
+          if (_syncResult != null)
+            Material(
+              color: theme.colorScheme.primaryContainer,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle_rounded,
+                        size: 16, color: Color(0xFF2AABEE)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(_syncResult!,
+                          style: theme.textTheme.bodySmall),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Add a rule to automatically download\n'
-                    'new files from a Telegram channel.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 16),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      onPressed: () => setState(() => _syncResult = null),
                     ),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: () =>
-                        _showAddRuleDialog(context, controller),
-                    icon: const Icon(Icons.add_rounded),
-                    label: const Text('Add Rule'),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: settings.mirrorRules.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (ctx, i) {
-                final rule = settings.mirrorRules[i];
-                return _MirrorRuleCard(
-                  rule: rule,
-                  onToggle: (enabled) =>
-                      controller.updateMirrorRule(i, rule.copyWith(enabled: enabled)),
-                  onDelete: () => controller.removeMirrorRule(i),
-                  onEdit: () =>
-                      _showEditRuleDialog(context, controller, i, rule),
-                );
-              },
             ),
+          Expanded(
+            child: settings.mirrorRules.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.sync_disabled_rounded,
+                          size: 64,
+                          color: theme.colorScheme.onSurfaceVariant
+                              .withValues(alpha: 0.4),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No mirror rules',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Add a rule to automatically download\n'
+                          'new files from a Telegram channel.',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        FilledButton.icon(
+                          onPressed: () =>
+                              _showAddRuleDialog(context, controller),
+                          icon: const Icon(Icons.add_rounded),
+                          label: const Text('Add Rule'),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: settings.mirrorRules.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (ctx, i) {
+                      final rule = settings.mirrorRules[i];
+                      return _MirrorRuleCard(
+                        rule: rule,
+                        syncing: _syncing,
+                        onToggle: (enabled) => controller.updateMirrorRule(
+                            i, rule.copyWith(enabled: enabled)),
+                        onDelete: () => controller.removeMirrorRule(i),
+                        onEdit: () =>
+                            _showEditRuleDialog(context, controller, i, rule),
+                        onSync: () => _runSyncForRule(context, rule),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
+
+  // ── Sync helpers ─────────────────────────────────────────────
+
+  Future<void> _runSync(BuildContext context) async {
+    if (_syncing) return;
+    setState(() {
+      _syncing = true;
+      _syncResult = null;
+    });
+    try {
+      final manager = ref.read(downloadManagerProvider);
+      final count = await manager.mirrorController.syncAll();
+      if (mounted) {
+        setState(() => _syncResult =
+            'Sync complete — $count new file${count == 1 ? '' : 's'} enqueued');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _syncResult = 'Sync failed: $e');
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  Future<void> _runSyncForRule(BuildContext context, MirrorRule rule) async {
+    if (_syncing) return;
+    setState(() {
+      _syncing = true;
+      _syncResult = null;
+    });
+    try {
+      final manager = ref.read(downloadManagerProvider);
+      final count = await manager.mirrorController.syncRule(rule);
+      if (mounted) {
+        final label =
+            rule.channelTitle.isNotEmpty ? rule.channelTitle : 'Channel';
+        setState(() => _syncResult =
+            '$label: $count new file${count == 1 ? '' : 's'} enqueued');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _syncResult = 'Sync failed: $e');
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  // ── Dialog helpers ───────────────────────────────────────────
 
   Future<void> _showAddRuleDialog(
       BuildContext context, SettingsController controller) async {
@@ -109,18 +216,24 @@ class MirrorRulesScreen extends ConsumerWidget {
   }
 }
 
+// ── Rule card ─────────────────────────────────────────────────────
+
 class _MirrorRuleCard extends StatelessWidget {
   const _MirrorRuleCard({
     required this.rule,
+    required this.syncing,
     required this.onToggle,
     required this.onDelete,
     required this.onEdit,
+    required this.onSync,
   });
 
   final MirrorRule rule;
+  final bool syncing;
   final ValueChanged<bool> onToggle;
   final VoidCallback onDelete;
   final VoidCallback onEdit;
+  final VoidCallback onSync;
 
   @override
   Widget build(BuildContext context) {
@@ -166,9 +279,31 @@ class _MirrorRuleCard extends StatelessWidget {
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
+                  if (rule.autoSyncInterval != MirrorSyncInterval.never)
+                    Text(
+                      'Auto-sync: ${rule.autoSyncInterval.label}'
+                      '${rule.lastSyncedAt != null ? ' · Last: ${_formatLastSync(rule.lastSyncedAt!)}' : ''}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFF2AABEE),
+                        fontSize: 11,
+                      ),
+                    ),
                 ],
               ),
             ),
+            // Per-rule sync button (only shown when rule is enabled).
+            if (rule.enabled)
+              IconButton(
+                icon: syncing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync_rounded, size: 18),
+                tooltip: 'Sync this channel now',
+                onPressed: syncing ? null : onSync,
+              ),
             Switch(
               value: rule.enabled,
               activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
@@ -180,8 +315,8 @@ class _MirrorRuleCard extends StatelessWidget {
               onPressed: onEdit,
             ),
             IconButton(
-              icon: const Icon(Icons.delete_rounded, size: 18,
-                  color: Color(0xFFEF5350)),
+              icon: const Icon(Icons.delete_rounded,
+                  size: 18, color: Color(0xFFEF5350)),
               onPressed: onDelete,
             ),
           ],
@@ -189,7 +324,19 @@ class _MirrorRuleCard extends StatelessWidget {
       ),
     );
   }
+
+  String _formatLastSync(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${dt.month}/${dt.day}';
+  }
 }
+
+// ── Add / edit dialog ─────────────────────────────────────────────
 
 class _MirrorRuleDialog extends StatefulWidget {
   const _MirrorRuleDialog({this.existing, required this.onSave});
@@ -206,17 +353,19 @@ class _MirrorRuleDialogState extends State<_MirrorRuleDialog> {
   late final TextEditingController _channelTitle;
   late final TextEditingController _folder;
   late final TextEditingController _extensions;
+  late MirrorSyncInterval _autoSyncInterval;
 
   @override
   void initState() {
     super.initState();
     final r = widget.existing;
-    _channelId = TextEditingController(
-        text: r != null ? r.channelId.toString() : '');
+    _channelId =
+        TextEditingController(text: r != null ? r.channelId.toString() : '');
     _channelTitle = TextEditingController(text: r?.channelTitle ?? '');
     _folder = TextEditingController(text: r?.localFolder ?? '');
-    _extensions = TextEditingController(
-        text: r?.filterExtensions.join(', ') ?? '');
+    _extensions =
+        TextEditingController(text: r?.filterExtensions.join(', ') ?? '');
+    _autoSyncInterval = r?.autoSyncInterval ?? MirrorSyncInterval.never;
   }
 
   @override
@@ -269,11 +418,8 @@ class _MirrorRuleDialogState extends State<_MirrorRuleDialog> {
                 IconButton(
                   icon: const Icon(Icons.folder_open_rounded),
                   onPressed: () async {
-                    final path =
-                        await FilePicker.platform.getDirectoryPath();
-                    if (path != null) {
-                      setState(() => _folder.text = path);
-                    }
+                    final path = await FilePicker.platform.getDirectoryPath();
+                    if (path != null) setState(() => _folder.text = path);
                   },
                 ),
               ],
@@ -287,6 +433,26 @@ class _MirrorRuleDialogState extends State<_MirrorRuleDialog> {
                 helperText: 'Leave empty to mirror all files',
                 border: OutlineInputBorder(),
               ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<MirrorSyncInterval>(
+              initialValue: _autoSyncInterval,
+              decoration: const InputDecoration(
+                labelText: 'Auto-sync interval',
+                helperText: 'Automatically backfill historical messages',
+                border: OutlineInputBorder(),
+              ),
+              items: MirrorSyncInterval.values
+                  .map((interval) => DropdownMenuItem(
+                        value: interval,
+                        child: Text(interval.label),
+                      ))
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _autoSyncInterval = value);
+                }
+              },
             ),
           ],
         ),
@@ -319,6 +485,8 @@ class _MirrorRuleDialogState extends State<_MirrorRuleDialog> {
       channelTitle: _channelTitle.text.trim(),
       localFolder: _folder.text.trim(),
       filterExtensions: exts,
+      autoSyncInterval: _autoSyncInterval,
+      lastSyncedAt: widget.existing?.lastSyncedAt,
     ));
     Navigator.pop(context);
   }

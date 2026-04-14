@@ -48,6 +48,17 @@ abstract final class _Keys {
   static const autoCleanupKeepFavorites = 'auto_cleanup_keep_favorites';
   // Mirror rules
   static const mirrorRules = 'mirror_rules_json';
+  // Haptics
+  static const hapticsEnabled = 'haptics_enabled';
+  // Notifications
+  static const notificationsEnabled = 'notifications_enabled';
+  static const notifyOnCompletion = 'notify_on_completion';
+  static const notifyOnError = 'notify_on_error';
+  static const notifyOnMilestone = 'notify_on_milestone';
+  static const notificationSound = 'notification_sound';
+  static const quietHoursEnabled = 'quiet_hours_enabled';
+  static const quietHoursStart = 'quiet_hours_start';
+  static const quietHoursEnd = 'quiet_hours_end';
 }
 
 /// Global settings provider.
@@ -112,6 +123,15 @@ class SettingsController extends Notifier<SettingsState> {
       autoCleanupKeepFavorites:
           _prefs?.getBool(_Keys.autoCleanupKeepFavorites) ?? true,
       mirrorRules: mirrors,
+      hapticsEnabled: _prefs?.getBool(_Keys.hapticsEnabled) ?? true,
+      notificationsEnabled: _prefs?.getBool(_Keys.notificationsEnabled) ?? true,
+      notifyOnCompletion: _prefs?.getBool(_Keys.notifyOnCompletion) ?? true,
+      notifyOnError: _prefs?.getBool(_Keys.notifyOnError) ?? true,
+      notifyOnMilestone: _prefs?.getBool(_Keys.notifyOnMilestone) ?? true,
+      notificationSound: _prefs?.getBool(_Keys.notificationSound) ?? true,
+      quietHoursEnabled: _prefs?.getBool(_Keys.quietHoursEnabled) ?? false,
+      quietHoursStart: _prefs?.getInt(_Keys.quietHoursStart) ?? 22,
+      quietHoursEnd: _prefs?.getInt(_Keys.quietHoursEnd) ?? 7,
     );
 
     Log.info(
@@ -326,6 +346,54 @@ class SettingsController extends Notifier<SettingsState> {
       Log.error('Failed to parse mirror rules: $e', tag: 'SETTINGS');
       return const [];
     }
+  }
+
+  // ── Haptic feedback ───────────────────────────────────────────
+
+  Future<void> setHapticsEnabled(bool enabled) async {
+    await _prefs?.setBool(_Keys.hapticsEnabled, enabled);
+    state = state.copyWith(hapticsEnabled: enabled);
+  }
+
+  // ── Notifications ─────────────────────────────────────────────
+
+  Future<void> setNotificationsEnabled(bool enabled) async {
+    await _prefs?.setBool(_Keys.notificationsEnabled, enabled);
+    state = state.copyWith(notificationsEnabled: enabled);
+  }
+
+  Future<void> setNotifyOnCompletion(bool enabled) async {
+    await _prefs?.setBool(_Keys.notifyOnCompletion, enabled);
+    state = state.copyWith(notifyOnCompletion: enabled);
+  }
+
+  Future<void> setNotifyOnError(bool enabled) async {
+    await _prefs?.setBool(_Keys.notifyOnError, enabled);
+    state = state.copyWith(notifyOnError: enabled);
+  }
+
+  Future<void> setNotifyOnMilestone(bool enabled) async {
+    await _prefs?.setBool(_Keys.notifyOnMilestone, enabled);
+    state = state.copyWith(notifyOnMilestone: enabled);
+  }
+
+  Future<void> setNotificationSound(bool enabled) async {
+    await _prefs?.setBool(_Keys.notificationSound, enabled);
+    state = state.copyWith(notificationSound: enabled);
+  }
+
+  Future<void> setQuietHoursEnabled(bool enabled) async {
+    await _prefs?.setBool(_Keys.quietHoursEnabled, enabled);
+    state = state.copyWith(quietHoursEnabled: enabled);
+  }
+
+  Future<void> setQuietHours(int start, int end) async {
+    await _prefs?.setInt(_Keys.quietHoursStart, start.clamp(0, 23));
+    await _prefs?.setInt(_Keys.quietHoursEnd, end.clamp(0, 23));
+    state = state.copyWith(
+      quietHoursStart: start.clamp(0, 23),
+      quietHoursEnd: end.clamp(0, 23),
+    );
   }
 
   // ── Path helpers ──────────────────────────────────────────────

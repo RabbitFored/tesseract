@@ -67,6 +67,8 @@ dependencies:
   fvp: ^0.35.2
   # PDF preview (cross-platform including Windows)
   syncfusion_flutter_pdfviewer: ^28.2.6
+  # Local notifications
+  flutter_local_notifications: ^17.0.0
 
 dev_dependencies:
   flutter_test:

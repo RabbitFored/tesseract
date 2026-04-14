@@ -5,6 +5,7 @@ enum DownloadStatus {
   paused,
   completed,
   extracting,
+  verifying,
   error;
 
   /// Convert to/from the string stored in SQLite.

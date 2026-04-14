@@ -57,6 +57,7 @@ class StatusStyle {
         DownloadStatus.paused => const Color(0xFFFFAB00),
         DownloadStatus.completed => const Color(0xFF00E676),
         DownloadStatus.extracting => const Color(0xFFAB47BC),
+        DownloadStatus.verifying => const Color(0xFF26A69A),
         DownloadStatus.error => const Color(0xFFFF1744),
       };
 
@@ -66,6 +67,7 @@ class StatusStyle {
         DownloadStatus.paused => 'Paused',
         DownloadStatus.completed => 'Completed',
         DownloadStatus.extracting => 'Extracting...',
+        DownloadStatus.verifying => 'Verifying...',
         DownloadStatus.error => 'Error',
       };
 }

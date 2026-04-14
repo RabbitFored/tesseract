@@ -10,7 +10,9 @@ import 'package:tdlib/td_api.dart';
 
 import '../../../core/tdlib/tdlib_client.dart';
 import '../../../core/tdlib/tdlib_provider.dart';
+import '../../../core/utils/haptic_helper.dart';
 import '../../../core/utils/logger.dart';
+import '../../notifications/data/notification_service.dart';
 import '../../settings/data/settings_controller.dart';
 import '../../settings/domain/settings_state.dart' as app_settings;
 import '../../browser/domain/media_message.dart';
@@ -47,6 +49,7 @@ class DownloadManager {
   late final MirrorController _mirror;
   StreamSubscription<TdObject>? _tdlibSub;
   Timer? _schedulePoller;
+  Timer? _autoSyncTimer;
   bool _initialized = false;
   bool _disposed = false;
 
@@ -56,6 +59,7 @@ class DownloadManager {
   DownloadDb get db => _db;
   SpeedTracker get speedTracker => _speed;
   ResourceMonitor get resourceMonitor => _resourceMonitor;
+  MirrorController get mirrorController => _mirror;
 
   int get _maxConcurrent =>
       _ref.read(settingsControllerProvider).concurrentDownloads;
@@ -73,6 +77,10 @@ class DownloadManager {
     await _db.database;
     await _db.resetStaleDownloads();
 
+    // Initialize notification service
+    final notificationService = _ref.read(notificationServiceProvider);
+    await notificationService.initialize();
+
     _resourceMonitor.onConstraintViolated = _onResourceViolated;
     _resourceMonitor.onConstraintRestored = _onResourceRestored;
     await _resourceMonitor.start();
@@ -86,13 +94,20 @@ class DownloadManager {
     final client = _ref.read(tdlibClientProvider);
     _tdlibSub = client.updates.listen(_onTdlibUpdate);
 
-    // Start channel mirror listener.
-    _mirror.start();
+    // Start channel mirror listener — pass enqueue as callback to avoid
+    // a circular provider dependency (MirrorController is owned by this manager).
+    _mirror.start(enqueuer: enqueue);
 
     // Poll for scheduled downloads every minute.
     _schedulePoller = Timer.periodic(
       const Duration(minutes: 1),
       (_) => _processScheduledItems(),
+    );
+
+    // Check for auto-sync mirror rules every 15 minutes.
+    _autoSyncTimer = Timer.periodic(
+      const Duration(minutes: 15),
+      (_) => _checkAutoSyncRules(),
     );
 
     // Run auto-cleanup on startup if enabled.
@@ -107,6 +122,7 @@ class DownloadManager {
     _disposed = true;
     _tdlibSub?.cancel();
     _schedulePoller?.cancel();
+    _autoSyncTimer?.cancel();
     _queueChanged.close();
     _speed.dispose();
     _resourceMonitor.dispose();
@@ -277,6 +293,26 @@ class DownloadManager {
       Log.tdlib('Download complete: fileId=${file.id} path=${local.path}');
       _speed.removeFile(file.id);
 
+      // Haptic feedback for completion
+      try {
+        final haptic = _ref.read(hapticHelperProvider);
+        haptic.success();
+      } catch (_) {
+        // Ignore haptic errors
+      }
+
+      // Notification for completion
+      try {
+        final notificationService = _ref.read(notificationServiceProvider);
+        await notificationService.notifyDownloadComplete(
+          fileId: file.id,
+          fileName: item.fileName,
+          fileSize: item.totalSize,
+        );
+      } catch (e) {
+        Log.error('Failed to send completion notification: $e', tag: 'DL_MGR');
+      }
+
       final publicPath = await _exportCompletedFile(item, local.path);
       final finalPath = publicPath ?? local.path;
 
@@ -314,7 +350,7 @@ class DownloadManager {
   Future<void> _verifyChecksum(DownloadItem item, String filePath) async {
     Log.info('Verifying checksum for ${item.fileName}', tag: 'DL_MGR');
     await _db.updateStatusWithReason(
-        item.fileId, DownloadStatus.extracting, '');
+        item.fileId, DownloadStatus.verifying, '');
     _notifyChange();
 
     final ok = await ChecksumService.verifyMd5(filePath, item.checksumMd5);
@@ -380,6 +416,44 @@ class DownloadManager {
     }
   }
 
+  // ── Auto-sync mirror rules ───────────────────────────────────
+
+  Future<void> _checkAutoSyncRules() async {
+    if (_disposed) return;
+    final settings = _ref.read(settingsControllerProvider);
+    final controller = _ref.read(settingsControllerProvider.notifier);
+
+    for (int i = 0; i < settings.mirrorRules.length; i++) {
+      final rule = settings.mirrorRules[i];
+      if (!rule.enabled) continue;
+      if (!rule.isDueForSync) continue;
+
+      Log.info(
+        'Auto-sync: syncing ${rule.channelTitle} (interval=${rule.autoSyncInterval.label})',
+        tag: 'DL_MGR',
+      );
+
+      try {
+        final count = await _mirror.syncRule(rule);
+        Log.info(
+          'Auto-sync: ${rule.channelTitle} enqueued $count items',
+          tag: 'DL_MGR',
+        );
+
+        // Update lastSyncedAt timestamp.
+        await controller.updateMirrorRule(
+          i,
+          rule.copyWith(lastSyncedAt: DateTime.now()),
+        );
+      } catch (e) {
+        Log.error(
+          'Auto-sync failed for ${rule.channelTitle}: $e',
+          tag: 'DL_MGR',
+        );
+      }
+    }
+  }
+
   // ── Auto-cleanup ─────────────────────────────────────────────
 
   Future<void> _runAutoCleanupIfNeeded() async {
@@ -390,6 +464,7 @@ class DownloadManager {
       db: _db,
       afterDays: settings.autoCleanupAfterDays,
       minFreeMb: settings.autoCleanupMinFreeMb,
+      downloadBasePath: settings.downloadBasePath,
     );
 
     if (result.deletedCount > 0) {
@@ -410,6 +485,7 @@ class DownloadManager {
       afterDays: settings.autoCleanupAfterDays,
       minFreeMb: settings.autoCleanupMinFreeMb,
       keepFileIds: keepFileIds,
+      downloadBasePath: settings.downloadBasePath,
     );
     _notifyChange();
     return result;
@@ -745,8 +821,6 @@ class DownloadManager {
     }
 
     try {
-      // Best-effort permission request before copying (safety net — Bug 1
-      // fix ensures these are already granted at startup on Android).
       if (Platform.isAndroid) {
         if (!await Permission.storage.isGranted) {
           await Permission.storage.request();
@@ -756,13 +830,21 @@ class DownloadManager {
         }
       }
 
-      // Read the CURRENT download path from settings state (not stale).
-      final targetPath = settingsNotifier.resolveDownloadPath(item.fileName);
+      // Mirror downloads go to the rule's localFolder, not the global path.
+      // Non-mirror downloads use the global resolveDownloadPath (with smart
+      // categorization applied).
+      final String targetPath;
+      if (item.mirrorChannelId != 0 && item.localPath.isNotEmpty) {
+        // item.localPath was set to "<localFolder>/<fileName>" by MirrorController.
+        // Use it directly — it already encodes the user's chosen folder.
+        targetPath = item.localPath;
+      } else {
+        targetPath = settingsNotifier.resolveDownloadPath(item.fileName);
+      }
       Log.info('Export target: $targetPath', tag: 'DL_MGR');
 
       final targetFile = IOFile(targetPath);
 
-      // Create parent directories.
       if (!await targetFile.parent.exists()) {
         await targetFile.parent.create(recursive: true);
         Log.info('Created directory: ${targetFile.parent.path}', tag: 'DL_MGR');
@@ -882,6 +964,30 @@ class DownloadManager {
     if (result is TdError) {
       Log.error('TDLib download error for fileId=$fileId: '
           '${result.code} ${result.message}');
+      
+      // Haptic feedback for error
+      try {
+        final haptic = _ref.read(hapticHelperProvider);
+        haptic.error();
+      } catch (_) {
+        // Ignore haptic errors
+      }
+
+      // Notification for error
+      try {
+        final item = await _db.getByFileId(fileId);
+        if (item != null) {
+          final notificationService = _ref.read(notificationServiceProvider);
+          await notificationService.notifyDownloadError(
+            fileId: fileId,
+            fileName: item.fileName,
+            errorReason: result.message,
+          );
+        }
+      } catch (e) {
+        Log.error('Failed to send error notification: $e', tag: 'DL_MGR');
+      }
+      
       _db.updateStatus(fileId, DownloadStatus.error);
       _speed.removeFile(fileId);
       _notifyChange();

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../core/utils/haptic_helper.dart';
 import '../../../downloader/data/download_manager.dart';
 import '../../../downloader/domain/download_item.dart';
 import '../../../downloader/domain/download_status.dart';
@@ -24,12 +25,20 @@ class DownloadItemCard extends ConsumerWidget {
     final statusColor = StatusStyle.colorFor(item.status);
     final fileColor = FileTypeIcon.colorFor(item.fileName);
     final fileIcon = FileTypeIcon.iconFor(item.fileName);
+    final haptic = ref.read(hapticHelperProvider);
 
     return RepaintBoundary(
       child: GestureDetector(
         onTap: item.status == DownloadStatus.completed
-            ? () => _openFile(context)
+            ? () {
+                haptic.light();
+                _openFile(context);
+              }
             : null,
+        onLongPress: () {
+          haptic.longPress();
+          // TODO: Multi-select mode (Phase 3)
+        },
         child: Card(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
           color: theme.colorScheme.surfaceContainerHigh,
@@ -86,8 +95,9 @@ class DownloadItemCard extends ConsumerWidget {
                         const SizedBox(height: 6),
                       ],
 
-                      // Indeterminate progress for extracting status
-                      if (item.status == DownloadStatus.extracting) ...[
+                      // Indeterminate progress for extracting / verifying status
+                      if (item.status == DownloadStatus.extracting ||
+                          item.status == DownloadStatus.verifying) ...[
                         RepaintBoundary(
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(3),
@@ -95,8 +105,10 @@ class DownloadItemCard extends ConsumerWidget {
                               minHeight: 5,
                               backgroundColor: theme.colorScheme.onSurface
                                   .withValues(alpha: 0.08),
-                              valueColor: const AlwaysStoppedAnimation<Color>(
-                                Color(0xFFAB47BC),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                item.status == DownloadStatus.verifying
+                                    ? const Color(0xFF26A69A)
+                                    : const Color(0xFFAB47BC),
                               ),
                             ),
                           ),
@@ -332,6 +344,7 @@ class _ActionButtons extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final manager = ref.read(downloadManagerProvider);
+    final haptic = ref.read(hapticHelperProvider);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -341,13 +354,19 @@ class _ActionButtons extends ConsumerWidget {
               icon: Icons.pause_rounded,
               tooltip: 'Pause',
               color: const Color(0xFFFFAB00),
-              onPressed: () => manager.pauseDownload(item.fileId),
+              onPressed: () {
+                haptic.medium();
+                manager.pauseDownload(item.fileId);
+              },
             ),
             _IconBtn(
               icon: Icons.close_rounded,
               tooltip: 'Cancel',
               color: const Color(0xFFFF1744),
-              onPressed: () => _confirmRemove(context, ref),
+              onPressed: () {
+                haptic.heavy();
+                _confirmRemove(context, ref);
+              },
             ),
           ],
         DownloadStatus.paused => [
@@ -355,13 +374,19 @@ class _ActionButtons extends ConsumerWidget {
               icon: Icons.play_arrow_rounded,
               tooltip: 'Resume',
               color: const Color(0xFF2AABEE),
-              onPressed: () => manager.resumeDownload(item.fileId),
+              onPressed: () {
+                haptic.medium();
+                manager.resumeDownload(item.fileId);
+              },
             ),
             _IconBtn(
               icon: Icons.close_rounded,
               tooltip: 'Remove',
               color: const Color(0xFFFF1744),
-              onPressed: () => _confirmRemove(context, ref),
+              onPressed: () {
+                haptic.heavy();
+                _confirmRemove(context, ref);
+              },
             ),
           ],
         DownloadStatus.queued => [
@@ -369,14 +394,19 @@ class _ActionButtons extends ConsumerWidget {
               icon: Icons.arrow_upward_rounded,
               tooltip: 'Prioritize',
               color: const Color(0xFF78909C),
-              onPressed: () =>
-                  manager.setPriority(item.fileId, item.priority + 1),
+              onPressed: () {
+                haptic.light();
+                manager.setPriority(item.fileId, item.priority + 1);
+              },
             ),
             _IconBtn(
               icon: Icons.close_rounded,
               tooltip: 'Remove',
               color: const Color(0xFFFF1744),
-              onPressed: () => _confirmRemove(context, ref),
+              onPressed: () {
+                haptic.heavy();
+                _confirmRemove(context, ref);
+              },
             ),
           ],
         DownloadStatus.extracting => [
@@ -394,18 +424,39 @@ class _ActionButtons extends ConsumerWidget {
               ),
             ),
           ],
+        DownloadStatus.verifying => [
+            const SizedBox(
+              width: 36,
+              height: 36,
+              child: Padding(
+                padding: EdgeInsets.all(8),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    Color(0xFF26A69A),
+                  ),
+                ),
+              ),
+            ),
+          ],
         DownloadStatus.completed => [
             _IconBtn(
               icon: Icons.share_rounded,
               tooltip: 'Share',
               color: const Color(0xFF2AABEE),
-              onPressed: () => _shareFile(context),
+              onPressed: () {
+                haptic.light();
+                _shareFile(context);
+              },
             ),
             _IconBtn(
               icon: Icons.delete_outline_rounded,
               tooltip: 'Remove',
               color: const Color(0xFF78909C),
-              onPressed: () => manager.removeFromQueue(item.fileId),
+              onPressed: () {
+                haptic.medium();
+                manager.removeFromQueue(item.fileId);
+              },
             ),
           ],
         DownloadStatus.error => [
@@ -413,13 +464,19 @@ class _ActionButtons extends ConsumerWidget {
               icon: Icons.refresh_rounded,
               tooltip: 'Retry',
               color: const Color(0xFF2AABEE),
-              onPressed: () => manager.manualRetry(item.fileId),
+              onPressed: () {
+                haptic.medium();
+                manager.manualRetry(item.fileId);
+              },
             ),
             _IconBtn(
               icon: Icons.close_rounded,
               tooltip: 'Remove',
               color: const Color(0xFFFF1744),
-              onPressed: () => manager.removeFromQueue(item.fileId),
+              onPressed: () {
+                haptic.heavy();
+                manager.removeFromQueue(item.fileId);
+              },
             ),
           ],
       },

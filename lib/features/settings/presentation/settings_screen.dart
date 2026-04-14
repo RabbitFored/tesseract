@@ -520,6 +520,211 @@ class SettingsScreen extends ConsumerWidget {
 
           const SizedBox(height: 24),
 
+          // ── Notifications ─────────────────────────────────
+          _SectionHeader(title: 'Notifications', theme: theme),
+
+          SwitchListTile(
+            title: const Text('Enable Notifications'),
+            subtitle: Text(
+              'Show notifications for download events',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            secondary: Icon(
+              Icons.notifications_rounded,
+              color: settings.notificationsEnabled
+                  ? const Color(0xFF2AABEE)
+                  : null,
+            ),
+            value: settings.notificationsEnabled,
+            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+            activeThumbColor: const Color(0xFF2AABEE),
+            onChanged: controller.setNotificationsEnabled,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ),
+
+          if (settings.notificationsEnabled) ...[
+            const Divider(indent: 16, endIndent: 16, height: 1),
+
+            SwitchListTile(
+              title: const Text('Completion Notifications'),
+              subtitle: Text(
+                'Notify when downloads complete',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              secondary: const Icon(Icons.check_circle_rounded, size: 20),
+              value: settings.notifyOnCompletion,
+              activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+              activeThumbColor: const Color(0xFF2AABEE),
+              onChanged: controller.setNotifyOnCompletion,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            ),
+
+            const Divider(indent: 16, endIndent: 16, height: 1),
+
+            SwitchListTile(
+              title: const Text('Error Notifications'),
+              subtitle: Text(
+                'Notify when downloads fail',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              secondary: const Icon(Icons.error_rounded, size: 20),
+              value: settings.notifyOnError,
+              activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+              activeThumbColor: const Color(0xFF2AABEE),
+              onChanged: controller.setNotifyOnError,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            ),
+
+            const Divider(indent: 16, endIndent: 16, height: 1),
+
+            SwitchListTile(
+              title: const Text('Milestone Notifications'),
+              subtitle: Text(
+                'Notify for achievements (100 files, 1GB, etc.)',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              secondary: const Icon(Icons.emoji_events_rounded, size: 20),
+              value: settings.notifyOnMilestone,
+              activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+              activeThumbColor: const Color(0xFF2AABEE),
+              onChanged: controller.setNotifyOnMilestone,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            ),
+
+            const Divider(indent: 16, endIndent: 16, height: 1),
+
+            SwitchListTile(
+              title: const Text('Notification Sound'),
+              subtitle: Text(
+                'Play sound with notifications',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              secondary: const Icon(Icons.volume_up_rounded, size: 20),
+              value: settings.notificationSound,
+              activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+              activeThumbColor: const Color(0xFF2AABEE),
+              onChanged: controller.setNotificationSound,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            ),
+
+            const Divider(indent: 16, endIndent: 16, height: 1),
+
+            SwitchListTile(
+              title: const Text('Quiet Hours'),
+              subtitle: Text(
+                settings.quietHoursEnabled
+                    ? 'Silent: ${_fmtHour(settings.quietHoursStart)} – ${_fmtHour(settings.quietHoursEnd)}'
+                    : 'Disabled',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: settings.quietHoursEnabled
+                      ? const Color(0xFF2AABEE)
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              secondary: const Icon(Icons.bedtime_rounded, size: 20),
+              value: settings.quietHoursEnabled,
+              activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+              activeThumbColor: const Color(0xFF2AABEE),
+              onChanged: controller.setQuietHoursEnabled,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            ),
+
+            if (settings.quietHoursEnabled) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Start time', style: theme.textTheme.bodySmall),
+                        _Badge(_fmtHour(settings.quietHoursStart)),
+                      ],
+                    ),
+                    Slider(
+                      value: settings.quietHoursStart.toDouble(),
+                      min: 0,
+                      max: 23,
+                      divisions: 23,
+                      label: _fmtHour(settings.quietHoursStart),
+                      activeColor: const Color(0xFF2AABEE),
+                      onChanged: (v) => controller.setQuietHours(
+                        v.round(),
+                        settings.quietHoursEnd,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('End time', style: theme.textTheme.bodySmall),
+                        _Badge(_fmtHour(settings.quietHoursEnd)),
+                      ],
+                    ),
+                    Slider(
+                      value: settings.quietHoursEnd.toDouble(),
+                      min: 0,
+                      max: 23,
+                      divisions: 23,
+                      label: _fmtHour(settings.quietHoursEnd),
+                      activeColor: const Color(0xFF2AABEE),
+                      onChanged: (v) => controller.setQuietHours(
+                        settings.quietHoursStart,
+                        v.round(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+
+          const SizedBox(height: 24),
+
+          // ── Haptic Feedback ───────────────────────────────
+          _SectionHeader(title: 'Haptic Feedback', theme: theme),
+
+          SwitchListTile(
+            title: const Text('Haptic Feedback'),
+            subtitle: Text(
+              'Vibration feedback for button presses and actions',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            secondary: Icon(
+              Icons.vibration_rounded,
+              color: settings.hapticsEnabled
+                  ? const Color(0xFF2AABEE)
+                  : null,
+            ),
+            value: settings.hapticsEnabled,
+            activeTrackColor: const Color(0xFF2AABEE).withValues(alpha: 0.5),
+            activeThumbColor: const Color(0xFF2AABEE),
+            onChanged: controller.setHapticsEnabled,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ),
+
+          const SizedBox(height: 24),
+
           // ── About ─────────────────────────────────────────
           _SectionHeader(title: 'About', theme: theme),
 

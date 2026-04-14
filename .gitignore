@@ -45,6 +45,7 @@ windows/flutter/ephemeral/
 .DS_Store
 Thumbs.db
 *.log
+.kiro/
 
 # ── Environment & Secrets ─────────────────────────────────────
 .env

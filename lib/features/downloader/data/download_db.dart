@@ -46,46 +46,52 @@ class DownloadDb {
   static const _table = 'downloads';
 
   /// How often buffered progress writes are flushed to SQLite.
-  static const _flushInterval = Duration(milliseconds: 500);
+  static const _flushInterval = Duration(milliseconds: 800);
 
   Database? _db;
+  bool _flushing = false; // guard against concurrent flushes
 
   // ── Write-coalescing buffer ───────────────────────────────────
-  // Accumulates in-flight progress updates so we write to SQLite at most
-  // once per [_flushInterval] per file instead of on every UpdateFile event.
-  // Status transitions (completed/error/paused) bypass the buffer and write
-  // immediately so the UI reflects them without delay.
   final Map<int, _PendingProgress> _pendingProgress = {};
   Timer? _flushTimer;
 
-  /// Start the periodic flush timer. Called once after [database] is ready.
   void _startFlushTimer() {
     _flushTimer ??= Timer.periodic(_flushInterval, (_) => _flushPending());
   }
 
   /// Write all buffered progress rows to SQLite in a single transaction.
+  /// Re-entrant safe: if a flush is already in progress, the new entries
+  /// will be picked up by the next timer tick.
   Future<void> _flushPending() async {
-    if (_pendingProgress.isEmpty) return;
+    if (_flushing || _pendingProgress.isEmpty) return;
+    _flushing = true;
+
     final snapshot = Map<int, _PendingProgress>.from(_pendingProgress);
     _pendingProgress.clear();
 
-    final db = await database;
-    await db.transaction((txn) async {
+    try {
+      final db = await database;
+      await db.transaction((txn) async {
+        for (final entry in snapshot.entries) {
+          await txn.update(
+            _table,
+            {
+              'downloaded_size': entry.value.downloadedSize,
+              'status': entry.value.status.name,
+            },
+            where: 'file_id = ?',
+            whereArgs: [entry.key],
+          );
+        }
+      });
+    } catch (e) {
+      // On failure, put the entries back so they're retried next tick.
       for (final entry in snapshot.entries) {
-        final fileId = entry.key;
-        final p = entry.value;
-        final fields = <String, dynamic>{
-          'downloaded_size': p.downloadedSize,
-          'status': p.status.name,
-        };
-        await txn.update(
-          _table,
-          fields,
-          where: 'file_id = ?',
-          whereArgs: [fileId],
-        );
+        _pendingProgress.putIfAbsent(entry.key, () => entry.value);
       }
-    });
+    } finally {
+      _flushing = false;
+    }
   }
 
   /// Singleton-friendly access; safe to call multiple times.
@@ -191,58 +197,90 @@ class DownloadDb {
     required int downloadedSize,
     required DownloadStatus status,
   }) async {
-    // Status transitions bypass the buffer — write immediately.
     if (status != DownloadStatus.downloading) {
-      await _flushPending(); // flush any buffered progress first
-      return updateProgressImmediate(fileId,
-          downloadedSize: downloadedSize, status: status);
+      // Status transition — write immediately via a combined transaction
+      // that also drains any buffered progress for other files.
+      await _flushAndWrite(fileId, downloadedSize: downloadedSize, status: status);
+      return;
     }
-    // Coalesce: overwrite any existing pending entry for this file.
     _pendingProgress[fileId] = _PendingProgress(
       downloadedSize: downloadedSize,
       status: status,
     );
   }
 
-  /// Buffer a progress + path update (used on download completion).
-  /// Always writes immediately since it accompanies a status transition.
+  /// Flush pending buffer + write a specific row atomically in one transaction.
+  Future<void> _flushAndWrite(
+    int fileId, {
+    required int downloadedSize,
+    required DownloadStatus status,
+    String? localPath,
+  }) async {
+    // Wait for any in-progress flush to finish first.
+    while (_flushing) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    _flushing = true;
+
+    final snapshot = Map<int, _PendingProgress>.from(_pendingProgress);
+    _pendingProgress.clear();
+
+    try {
+      final db = await database;
+      await db.transaction((txn) async {
+        // Flush buffered progress for other files.
+        for (final entry in snapshot.entries) {
+          if (entry.key == fileId) continue; // will be overwritten below
+          await txn.update(
+            _table,
+            {
+              'downloaded_size': entry.value.downloadedSize,
+              'status': entry.value.status.name,
+            },
+            where: 'file_id = ?',
+            whereArgs: [entry.key],
+          );
+        }
+        // Write the immediate update.
+        final fields = <String, dynamic>{
+          'downloaded_size': downloadedSize,
+          'status': status.name,
+        };
+        if (localPath != null) fields['local_path'] = localPath;
+        await txn.update(
+          _table,
+          fields,
+          where: 'file_id = ?',
+          whereArgs: [fileId],
+        );
+      });
+    } catch (e) {
+      for (final entry in snapshot.entries) {
+        _pendingProgress.putIfAbsent(entry.key, () => entry.value);
+      }
+      rethrow;
+    } finally {
+      _flushing = false;
+    }
+  }
+
   Future<void> updateProgressAndPath(
     int fileId, {
     required int downloadedSize,
     required DownloadStatus status,
     required String localPath,
   }) async {
-    await _flushPending(); // flush any buffered progress first
-    final db = await database;
-    await db.update(
-      _table,
-      {
-        'downloaded_size': downloadedSize,
-        'status': status.name,
-        'local_path': localPath,
-      },
-      where: 'file_id = ?',
-      whereArgs: [fileId],
-    );
+    await _flushAndWrite(fileId,
+        downloadedSize: downloadedSize, status: status, localPath: localPath);
   }
 
-  /// Write a progress update immediately, bypassing the coalesce buffer.
-  /// Used for status transitions (completed, error, paused).
   Future<void> updateProgressImmediate(
     int fileId, {
     required int downloadedSize,
     required DownloadStatus status,
   }) async {
-    final db = await database;
-    await db.update(
-      _table,
-      {
-        'downloaded_size': downloadedSize,
-        'status': status.name,
-      },
-      where: 'file_id = ?',
-      whereArgs: [fileId],
-    );
+    await _flushAndWrite(fileId,
+        downloadedSize: downloadedSize, status: status);
   }
 
   /// Update only the status of a download item.
@@ -427,7 +465,10 @@ class DownloadDb {
   Future<void> close() async {
     _flushTimer?.cancel();
     _flushTimer = null;
-    // Flush any remaining buffered progress before closing.
+    // Wait for any in-progress flush, then flush remaining.
+    while (_flushing) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
     await _flushPending();
     await _db?.close();
     _db = null;

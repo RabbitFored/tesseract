@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:battery_plus/battery_plus.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/logger.dart';
@@ -23,7 +25,11 @@ class ResourceMonitor {
 
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   StreamSubscription<BatteryState>? _batterySub;
+  StreamSubscription<dynamic>? _thermalSub;
   Timer? _scheduleTimer;
+
+  // Android thermal event channel (API 29+ native listener, API <29 polling).
+  static const _thermalChannel = EventChannel('tesseract/thermal');
 
   ResourceCallback? onConstraintViolated;
   ResourceCallback? onConstraintRestored;
@@ -50,6 +56,9 @@ class ResourceMonitor {
     _batterySub =
         _battery.onBatteryStateChanged.listen(_onBatteryStateChanged);
 
+    // Wire up native thermal events on Android.
+    _startThermalMonitoring();
+
     // Re-evaluate schedule every minute.
     _scheduleTimer = Timer.periodic(
       const Duration(minutes: 1),
@@ -62,7 +71,28 @@ class ResourceMonitor {
   void dispose() {
     _connSub?.cancel();
     _batterySub?.cancel();
+    _thermalSub?.cancel();
     _scheduleTimer?.cancel();
+  }
+
+  // ── Thermal monitoring ───────────────────────────────────────
+
+  void _startThermalMonitoring() {
+    // The tesseract/thermal EventChannel is only implemented on Android.
+    // On Windows/Linux/iOS the channel doesn't exist — skip silently.
+    if (!Platform.isAndroid) return;
+    try {
+      _thermalSub = _thermalChannel.receiveBroadcastStream().listen(
+        (dynamic value) {
+          if (value is bool) reportThermalState(value);
+        },
+        onError: (dynamic e) {
+          Log.info('Thermal channel error: $e', tag: 'RES_MON');
+        },
+      );
+    } catch (e) {
+      Log.info('Thermal monitoring not supported on this platform', tag: 'RES_MON');
+    }
   }
 
   // ── Connectivity ─────────────────────────────────────────────

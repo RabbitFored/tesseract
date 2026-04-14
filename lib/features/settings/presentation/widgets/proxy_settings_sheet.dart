@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../downloader/data/download_manager.dart';
 import '../../data/settings_controller.dart';
 import '../../domain/settings_state.dart';
 
@@ -193,6 +195,13 @@ class _ProxySettingsSheetState extends State<ProxySettingsSheet> {
         password: _pass.text,
         secret: _secret.text.trim(),
       );
+    }
+    // Re-apply proxy to TDLib immediately so the change takes effect
+    // without requiring an app restart.
+    if (mounted) {
+      final manager = ProviderScope.containerOf(context)
+          .read(downloadManagerProvider);
+      await manager.reapplyProxy();
     }
     if (mounted) Navigator.pop(context);
   }

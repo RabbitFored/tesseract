@@ -39,6 +39,17 @@ class SettingsState {
     this.autoCleanupKeepFavorites = true,
     // ── Channel mirroring ─────────────────────────────────
     this.mirrorRules = const [],
+    // ── Haptic feedback ───────────────────────────────────
+    this.hapticsEnabled = true,
+    // ── Notifications ─────────────────────────────────────
+    this.notificationsEnabled = true,
+    this.notifyOnCompletion = true,
+    this.notifyOnError = true,
+    this.notifyOnMilestone = true,
+    this.notificationSound = true,
+    this.quietHoursEnabled = false,
+    this.quietHoursStart = 22,
+    this.quietHoursEnd = 7,
   });
 
   // ── Core ──────────────────────────────────────────────────────
@@ -114,16 +125,32 @@ class SettingsState {
   // ── Channel mirroring ─────────────────────────────────────────
   final List<MirrorRule> mirrorRules;
 
+  // ── Haptic feedback ───────────────────────────────────────────
+  final bool hapticsEnabled;
+
+  // ── Notifications ─────────────────────────────────────────────
+  final bool notificationsEnabled;
+  final bool notifyOnCompletion;
+  final bool notifyOnError;
+  final bool notifyOnMilestone;
+  final bool notificationSound;
+  final bool quietHoursEnabled;
+  final int quietHoursStart;
+  final int quietHoursEnd;
+
   // ── Helpers ───────────────────────────────────────────────────
 
   /// Whether the current time falls within the scheduled download window.
   bool get isWithinSchedule {
     if (!downloadOnlyOnSchedule) return true;
+    // If start == end, treat as "all day" (no restriction).
+    if (scheduleStartHour == scheduleEndHour) return true;
     final now = DateTime.now().hour;
-    if (scheduleStartHour <= scheduleEndHour) {
+    if (scheduleStartHour < scheduleEndHour) {
+      // Normal window: e.g. 02:00 – 06:00
       return now >= scheduleStartHour && now < scheduleEndHour;
     }
-    // Overnight window (e.g. 22:00 – 06:00).
+    // Overnight window: e.g. 22:00 – 06:00
     return now >= scheduleStartHour || now < scheduleEndHour;
   }
 
@@ -158,6 +185,15 @@ class SettingsState {
     int? autoCleanupMinFreeMb,
     bool? autoCleanupKeepFavorites,
     List<MirrorRule>? mirrorRules,
+    bool? hapticsEnabled,
+    bool? notificationsEnabled,
+    bool? notifyOnCompletion,
+    bool? notifyOnError,
+    bool? notifyOnMilestone,
+    bool? notificationSound,
+    bool? quietHoursEnabled,
+    int? quietHoursStart,
+    int? quietHoursEnd,
   }) =>
       SettingsState(
         concurrentDownloads: concurrentDownloads ?? this.concurrentDownloads,
@@ -195,6 +231,15 @@ class SettingsState {
         autoCleanupKeepFavorites:
             autoCleanupKeepFavorites ?? this.autoCleanupKeepFavorites,
         mirrorRules: mirrorRules ?? this.mirrorRules,
+        hapticsEnabled: hapticsEnabled ?? this.hapticsEnabled,
+        notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+        notifyOnCompletion: notifyOnCompletion ?? this.notifyOnCompletion,
+        notifyOnError: notifyOnError ?? this.notifyOnError,
+        notifyOnMilestone: notifyOnMilestone ?? this.notifyOnMilestone,
+        notificationSound: notificationSound ?? this.notificationSound,
+        quietHoursEnabled: quietHoursEnabled ?? this.quietHoursEnabled,
+        quietHoursStart: quietHoursStart ?? this.quietHoursStart,
+        quietHoursEnd: quietHoursEnd ?? this.quietHoursEnd,
       );
 
   /// Map file extension to a categorized sub-folder name.
@@ -246,6 +291,32 @@ enum ProxyType { none, socks5, mtproto }
 
 // ── Mirror rule ───────────────────────────────────────────────────
 
+/// How often a mirror rule automatically backfills historical messages.
+enum MirrorSyncInterval {
+  never,
+  hourly,
+  daily,
+  weekly,
+  monthly;
+
+  String get label => switch (this) {
+        MirrorSyncInterval.never => 'Manual only',
+        MirrorSyncInterval.hourly => 'Every hour',
+        MirrorSyncInterval.daily => 'Once daily',
+        MirrorSyncInterval.weekly => 'Once weekly',
+        MirrorSyncInterval.monthly => 'Once monthly',
+      };
+
+  /// Duration between syncs. Null means never auto-sync.
+  Duration? get duration => switch (this) {
+        MirrorSyncInterval.never => null,
+        MirrorSyncInterval.hourly => const Duration(hours: 1),
+        MirrorSyncInterval.daily => const Duration(days: 1),
+        MirrorSyncInterval.weekly => const Duration(days: 7),
+        MirrorSyncInterval.monthly => const Duration(days: 30),
+      };
+}
+
 /// A rule that mirrors all new media from a Telegram channel to a local folder.
 class MirrorRule {
   const MirrorRule({
@@ -256,6 +327,8 @@ class MirrorRule {
     this.filterExtensions = const [],
     this.minFileSizeBytes = 0,
     this.maxFileSizeBytes = 0,
+    this.autoSyncInterval = MirrorSyncInterval.never,
+    this.lastSyncedAt,
   });
 
   final int channelId;
@@ -272,6 +345,20 @@ class MirrorRule {
   /// Maximum file size to mirror (0 = no maximum).
   final int maxFileSizeBytes;
 
+  /// How often to automatically backfill historical messages.
+  final MirrorSyncInterval autoSyncInterval;
+
+  /// When this rule was last auto-synced (null = never).
+  final DateTime? lastSyncedAt;
+
+  /// Whether this rule is due for an auto-sync right now.
+  bool get isDueForSync {
+    final interval = autoSyncInterval.duration;
+    if (interval == null) return false;
+    if (lastSyncedAt == null) return true;
+    return DateTime.now().difference(lastSyncedAt!) >= interval;
+  }
+
   MirrorRule copyWith({
     int? channelId,
     String? channelTitle,
@@ -280,6 +367,9 @@ class MirrorRule {
     List<String>? filterExtensions,
     int? minFileSizeBytes,
     int? maxFileSizeBytes,
+    MirrorSyncInterval? autoSyncInterval,
+    DateTime? lastSyncedAt,
+    bool clearLastSyncedAt = false,
   }) =>
       MirrorRule(
         channelId: channelId ?? this.channelId,
@@ -289,6 +379,9 @@ class MirrorRule {
         filterExtensions: filterExtensions ?? this.filterExtensions,
         minFileSizeBytes: minFileSizeBytes ?? this.minFileSizeBytes,
         maxFileSizeBytes: maxFileSizeBytes ?? this.maxFileSizeBytes,
+        autoSyncInterval: autoSyncInterval ?? this.autoSyncInterval,
+        lastSyncedAt:
+            clearLastSyncedAt ? null : (lastSyncedAt ?? this.lastSyncedAt),
       );
 
   Map<String, dynamic> toJson() => {
@@ -299,6 +392,8 @@ class MirrorRule {
         'filterExtensions': filterExtensions,
         'minFileSizeBytes': minFileSizeBytes,
         'maxFileSizeBytes': maxFileSizeBytes,
+        'autoSyncInterval': autoSyncInterval.name,
+        'lastSyncedAt': lastSyncedAt?.toIso8601String(),
       };
 
   factory MirrorRule.fromJson(Map<String, dynamic> json) => MirrorRule(
@@ -311,5 +406,12 @@ class MirrorRule {
             const [],
         minFileSizeBytes: json['minFileSizeBytes'] as int? ?? 0,
         maxFileSizeBytes: json['maxFileSizeBytes'] as int? ?? 0,
+        autoSyncInterval: MirrorSyncInterval.values.firstWhere(
+          (e) => e.name == (json['autoSyncInterval'] as String? ?? 'never'),
+          orElse: () => MirrorSyncInterval.never,
+        ),
+        lastSyncedAt: json['lastSyncedAt'] != null
+            ? DateTime.tryParse(json['lastSyncedAt'] as String)
+            : null,
       );
 }
