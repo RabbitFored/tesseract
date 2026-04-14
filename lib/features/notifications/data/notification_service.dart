@@ -33,20 +33,18 @@ class NotificationService {
   Future<void> initialize() async {
     if (_initialized) return;
 
+    // Only initialize on Android
+    if (!Platform.isAndroid) {
+      Log.info('Notifications only supported on Android', tag: 'NOTIF');
+      return;
+    }
+
     try {
       // Android initialization
       const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
 
-      // iOS initialization (if needed in future)
-      const iosSettings = DarwinInitializationSettings(
-        requestAlertPermission: true,
-        requestBadgePermission: true,
-        requestSoundPermission: true,
-      );
-
       const initSettings = InitializationSettings(
         android: androidSettings,
-        iOS: iosSettings,
       );
 
       await _notifications.initialize(
@@ -55,12 +53,10 @@ class NotificationService {
       );
 
       // Request permissions (Android 13+)
-      if (Platform.isAndroid) {
-        await _notifications
-            .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>()
-            ?.requestNotificationsPermission();
-      }
+      await _notifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
 
       _initialized = true;
       Log.info('NotificationService initialized', tag: 'NOTIF');
@@ -109,7 +105,7 @@ class NotificationService {
     required String fileName,
     required int fileSize,
   }) async {
-    if (!_initialized || !_canNotify) return;
+    if (!Platform.isAndroid || !_initialized || !_canNotify) return;
 
     final settings = _ref.read(settingsControllerProvider);
     if (!settings.notifyOnCompletion) return;
@@ -161,7 +157,7 @@ class NotificationService {
     required String fileName,
     required String errorReason,
   }) async {
-    if (!_initialized || !_canNotify) return;
+    if (!Platform.isAndroid || !_initialized || !_canNotify) return;
 
     final settings = _ref.read(settingsControllerProvider);
     if (!settings.notifyOnError) return;
@@ -211,7 +207,7 @@ class NotificationService {
     required String title,
     required String message,
   }) async {
-    if (!_initialized || !_canNotify) return;
+    if (!Platform.isAndroid || !_initialized || !_canNotify) return;
 
     final settings = _ref.read(settingsControllerProvider);
     if (!settings.notifyOnMilestone) return;
@@ -248,7 +244,7 @@ class NotificationService {
     required int totalCount,
     required double progress,
   }) async {
-    if (!_initialized) return;
+    if (!Platform.isAndroid || !_initialized) return;
 
     try {
       final progressPercent = (progress * 100).toInt();
@@ -283,13 +279,13 @@ class NotificationService {
 
   /// Cancel progress notification
   Future<void> cancelProgressNotification() async {
-    if (!_initialized) return;
+    if (!Platform.isAndroid || !_initialized) return;
     await _notifications.cancel(_progressId);
   }
 
   /// Cancel all notifications
   Future<void> cancelAll() async {
-    if (!_initialized) return;
+    if (!Platform.isAndroid || !_initialized) return;
     await _notifications.cancelAll();
   }
 

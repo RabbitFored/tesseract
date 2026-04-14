@@ -10,9 +10,9 @@ import 'package:tdlib/td_api.dart';
 
 import '../../../core/tdlib/tdlib_client.dart';
 import '../../../core/tdlib/tdlib_provider.dart';
-import '../../../core/utils/haptic_helper.dart';
 import '../../../core/utils/logger.dart';
 import '../../notifications/data/notification_service.dart';
+import '../../settings/data/haptic_helper.dart';
 import '../../settings/data/settings_controller.dart';
 import '../../settings/domain/settings_state.dart' as app_settings;
 import '../../browser/domain/media_message.dart';

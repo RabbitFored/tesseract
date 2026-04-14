@@ -1,7 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/settings/data/settings_controller.dart';
+import 'settings_controller.dart';
 
 /// Centralized haptic feedback helper that respects user settings.
 class HapticHelper {

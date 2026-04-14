@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../core/utils/haptic_helper.dart';
+import '../../../settings/data/haptic_helper.dart';
 import '../../../downloader/data/download_manager.dart';
 import '../../../downloader/domain/download_item.dart';
 import '../../../downloader/domain/download_status.dart';
