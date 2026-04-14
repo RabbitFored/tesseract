@@ -11,6 +11,7 @@ import 'package:tdlib/td_api.dart';
 import '../../../core/tdlib/tdlib_client.dart';
 import '../../../core/tdlib/tdlib_provider.dart';
 import '../../../core/utils/logger.dart';
+import '../../analytics/data/analytics_service.dart';
 import '../../notifications/data/notification_service.dart';
 import '../../settings/data/haptic_helper.dart';
 import '../../settings/data/settings_controller.dart';
@@ -311,6 +312,19 @@ class DownloadManager {
         );
       } catch (e) {
         Log.error('Failed to send completion notification: $e', tag: 'DL_MGR');
+      }
+
+      // Track download completed
+      try {
+        final analytics = _ref.read(analyticsServiceProvider);
+        await analytics.trackDownloadCompleted(
+          fileId: file.id,
+          fileSize: item.totalSize,
+          fileName: item.fileName,
+          channelId: item.chatId != 0 ? item.chatId : null,
+        );
+      } catch (e) {
+        Log.error('Failed to track download completed: $e', tag: 'DL_MGR');
       }
 
       final publicPath = await _exportCompletedFile(item, local.path);
@@ -620,6 +634,22 @@ class DownloadManager {
     _notifyChange();
     _speed.start();
 
+    // Track download started
+    try {
+      final item = await _db.getByFileId(fileId);
+      if (item != null) {
+        final analytics = _ref.read(analyticsServiceProvider);
+        await analytics.trackDownloadStarted(
+          fileId: fileId,
+          fileSize: item.totalSize,
+          fileName: item.fileName,
+          channelId: item.chatId != 0 ? item.chatId : null,
+        );
+      }
+    } catch (e) {
+      Log.error('Failed to track download started: $e', tag: 'DL_MGR');
+    }
+
     // TDLib priority 1–32. We use 32 (max) for user-initiated downloads.
     // Background/mirror downloads use lower priority so user downloads
     // always get bandwidth first. There is no TDLib API for a hard speed
@@ -664,6 +694,20 @@ class DownloadManager {
     _speed.removeFile(fileId);
     _pushProgressToService();
     await _processQueue();
+
+    // Track pause
+    try {
+      final item = await _db.getByFileId(fileId);
+      if (item != null) {
+        final analytics = _ref.read(analyticsServiceProvider);
+        await analytics.trackDownloadPaused(
+          fileId: fileId,
+          channelId: item.chatId != 0 ? item.chatId : null,
+        );
+      }
+    } catch (e) {
+      Log.error('Failed to track download paused: $e', tag: 'DL_MGR');
+    }
   }
 
   Future<void> resumeDownload(int fileId) async {
@@ -671,6 +715,20 @@ class DownloadManager {
     await _db.updateStatus(fileId, DownloadStatus.queued);
     _notifyChange();
     await _processQueue();
+
+    // Track resume
+    try {
+      final item = await _db.getByFileId(fileId);
+      if (item != null) {
+        final analytics = _ref.read(analyticsServiceProvider);
+        await analytics.trackDownloadResumed(
+          fileId: fileId,
+          channelId: item.chatId != 0 ? item.chatId : null,
+        );
+      }
+    } catch (e) {
+      Log.error('Failed to track download resumed: $e', tag: 'DL_MGR');
+    }
   }
 
   Future<void> retryDownload(int fileId) async {
@@ -982,6 +1040,15 @@ class DownloadManager {
             fileId: fileId,
             fileName: item.fileName,
             errorReason: result.message,
+          );
+
+          // Track download failed
+          final analytics = _ref.read(analyticsServiceProvider);
+          await analytics.trackDownloadFailed(
+            fileId: fileId,
+            fileName: item.fileName,
+            errorReason: result.message,
+            channelId: item.chatId != 0 ? item.chatId : null,
           );
         }
       } catch (e) {

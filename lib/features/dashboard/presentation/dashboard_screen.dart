@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../analytics/presentation/statistics_screen.dart';
 import '../../downloader/data/download_manager.dart';
 import '../../downloader/domain/download_item.dart';
 import '../../downloader/domain/download_provider.dart';
@@ -28,6 +29,16 @@ class DashboardScreen extends ConsumerWidget {
           ),
           centerTitle: false,
           actions: [
+            IconButton(
+              icon: const Icon(Icons.bar_chart_rounded),
+              tooltip: 'Statistics',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const StatisticsScreen(),
+                ),
+              ),
+            ),
             IconButton(
               icon: const Icon(Icons.folder_open_rounded),
               tooltip: 'Browse Chats',
