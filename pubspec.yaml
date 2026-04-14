@@ -65,6 +65,8 @@ dependencies:
   audioplayers: ^6.1.0
   # Windows/Linux video player support (extends video_player to all desktop platforms)
   fvp: ^0.35.2
+  # PDF preview (cross-platform including Windows)
+  syncfusion_flutter_pdfviewer: ^28.2.6
 
 dev_dependencies:
   flutter_test:

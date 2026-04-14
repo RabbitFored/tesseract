@@ -377,30 +377,39 @@ class TdLibClient {
     }
 
     // Poll.question: 1.8.x sends question as a FormattedText object,
-    // 1.6.0 Dart SDK Poll.fromJson expects a plain String at line 51.
+    // 1.6.0 Dart SDK Poll.fromJson expects a plain String.
     if (type == 'poll') {
       final question = json['question'];
       if (question is Map<String, dynamic>) {
         json['question'] = question['text'] as String? ?? '';
       }
 
-      // Poll.options: 1.8.x sends List<PollOption> objects, 1.6.0 expects List<String>.
+      // Poll.options: 1.8.x sends List<PollOption> objects where each option's
+      // `text` field is a FormattedText object. The 1.6.0 SDK's Poll.fromJson
+      // calls PollOption.fromJson(item) on each — so we must keep them as Maps
+      // but unwrap the nested FormattedText in each option's `text` field.
+      // Do NOT flatten to List<String> — that breaks PollOption.fromJson.
       final options = json['options'];
-      if (options is List && options.isNotEmpty && options.first is Map) {
-        json['options'] = options.map((o) {
+      if (options is List) {
+        for (final o in options) {
           if (o is Map<String, dynamic>) {
             final text = o['text'];
             if (text is Map<String, dynamic>) {
-              return text['text'] as String? ?? '';
+              // Unwrap FormattedText → plain String in-place.
+              o['text'] = text['text'] as String? ?? '';
             }
-            return text as String? ?? '';
+            // Ensure required PollOption fields exist.
+            o.putIfAbsent('voter_count', () => 0);
+            o.putIfAbsent('vote_percentage', () => 0);
+            o.putIfAbsent('is_chosen', () => false);
+            o.putIfAbsent('is_being_chosen', () => false);
           }
-          return o.toString();
-        }).toList();
+        }
       }
     }
 
     // PollOption.text: 1.8.x sends as FormattedText, 1.6.0 expects plain String.
+    // This handles pollOption objects that appear outside of poll.options.
     if (type == 'pollOption') {
       final text = json['text'];
       if (text is Map<String, dynamic>) {
