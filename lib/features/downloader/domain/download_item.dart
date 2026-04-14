@@ -22,6 +22,7 @@ class DownloadItem {
     this.speedLimitBps = 0,
     this.scheduledAt,
     this.mirrorChannelId = 0,
+    this.lastViewedAt,
   });
 
   /// Auto-incremented row ID in SQLite (null before insertion).
@@ -81,6 +82,9 @@ class DownloadItem {
   /// If non-zero, this download was triggered by a channel mirror rule.
   final int mirrorChannelId;
 
+  /// Timestamp when the file was last viewed/opened (for future use).
+  final DateTime? lastViewedAt;
+
   // ── Computed ─────────────────────────────────────────────────
 
   /// Progress as a fraction 0.0 – 1.0.
@@ -122,6 +126,8 @@ class DownloadItem {
         'speed_limit_bps': speedLimitBps,
         'scheduled_at': scheduledAt?.toIso8601String() ?? '',
         'mirror_channel_id': mirrorChannelId,
+        if (lastViewedAt != null)
+          'last_viewed_at': lastViewedAt!.millisecondsSinceEpoch,
       };
 
   factory DownloadItem.fromMap(Map<String, dynamic> map) => DownloadItem(
@@ -146,6 +152,9 @@ class DownloadItem {
             ? DateTime.tryParse(map['scheduled_at'] as String)
             : null,
         mirrorChannelId: map['mirror_channel_id'] as int? ?? 0,
+        lastViewedAt: map['last_viewed_at'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(map['last_viewed_at'] as int)
+            : null,
       );
 
   DownloadItem copyWith({
@@ -168,6 +177,8 @@ class DownloadItem {
     DateTime? scheduledAt,
     bool clearScheduledAt = false,
     int? mirrorChannelId,
+    DateTime? lastViewedAt,
+    bool clearLastViewedAt = false,
   }) =>
       DownloadItem(
         id: id ?? this.id,
@@ -188,6 +199,7 @@ class DownloadItem {
         speedLimitBps: speedLimitBps ?? this.speedLimitBps,
         scheduledAt: clearScheduledAt ? null : (scheduledAt ?? this.scheduledAt),
         mirrorChannelId: mirrorChannelId ?? this.mirrorChannelId,
+        lastViewedAt: clearLastViewedAt ? null : (lastViewedAt ?? this.lastViewedAt),
       );
 
   @override

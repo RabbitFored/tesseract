@@ -22,7 +22,7 @@ class _PendingProgress {
 
 /// SQLite database wrapper for the download queue.
 ///
-/// Table schema (v3):
+/// Table schema (v7):
 ///   id                INTEGER PRIMARY KEY AUTOINCREMENT
 ///   file_id           INTEGER NOT NULL UNIQUE
 ///   local_path        TEXT    NOT NULL
@@ -40,9 +40,12 @@ class _PendingProgress {
 ///   speed_limit_bps   INTEGER DEFAULT 0
 ///   scheduled_at      TEXT    DEFAULT ''
 ///   mirror_channel_id INTEGER DEFAULT 0
+///   is_favorite       INTEGER DEFAULT 0
+///   tags              TEXT    DEFAULT ''
+///   last_viewed_at    INTEGER
 class DownloadDb {
   static const _dbName = 'download_queue.db';
-  static const _dbVersion = 3;
+  static const _dbVersion = 7;
   static const _table = 'downloads';
 
   /// How often buffered progress writes are flushed to SQLite.
@@ -141,11 +144,26 @@ class DownloadDb {
             checksum_md5      TEXT    DEFAULT '',
             speed_limit_bps   INTEGER DEFAULT 0,
             scheduled_at      TEXT    DEFAULT '',
-            mirror_channel_id INTEGER DEFAULT 0
+            mirror_channel_id INTEGER DEFAULT 0,
+            is_favorite       INTEGER DEFAULT 0,
+            tags              TEXT    DEFAULT '',
+            last_viewed_at    INTEGER
           )
         ''');
         await db.execute(
           'CREATE INDEX idx_status_priority ON $_table (status, priority DESC)',
+        );
+        await db.execute(
+          'CREATE INDEX idx_downloads_favorite ON $_table (is_favorite)',
+        );
+        await db.execute(
+          'CREATE INDEX idx_downloads_status ON $_table (status)',
+        );
+        await db.execute(
+          'CREATE INDEX idx_downloads_created_at ON $_table (created_at)',
+        );
+        await db.execute(
+          'CREATE INDEX idx_downloads_file_name ON $_table (file_name)',
         );
       },
       onUpgrade: (db, oldVersion, newVersion) async {
@@ -171,6 +189,48 @@ class DownloadDb {
           await db.execute(
             'ALTER TABLE $_table ADD COLUMN mirror_channel_id INTEGER DEFAULT 0',
           );
+        }
+        if (oldVersion < 4) {
+          // v4: favorites support for queue management.
+          await db.execute(
+            'ALTER TABLE $_table ADD COLUMN is_favorite INTEGER DEFAULT 0',
+          );
+          await db.execute(
+            'CREATE INDEX idx_downloads_favorite ON $_table (is_favorite)',
+          );
+          await db.execute(
+            'CREATE INDEX idx_downloads_status ON $_table (status)',
+          );
+          await db.execute(
+            'CREATE INDEX idx_downloads_created_at ON $_table (created_at)',
+          );
+          await db.execute(
+            'CREATE INDEX idx_downloads_file_name ON $_table (file_name)',
+          );
+        }
+        if (oldVersion < 5) {
+          // v5: tags column for future use.
+          await db.execute(
+            "ALTER TABLE $_table ADD COLUMN tags TEXT DEFAULT ''",
+          );
+        }
+        if (oldVersion < 6) {
+          // v6: last_viewed_at column for future use.
+          await db.execute(
+            'ALTER TABLE $_table ADD COLUMN last_viewed_at INTEGER',
+          );
+        }
+        if (oldVersion < 7) {
+          // v7: file_name index for search optimization.
+          // Check if index already exists (created in v4) to avoid duplicate index error
+          final existingIndexes = await db.rawQuery(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_downloads_file_name'",
+          );
+          if (existingIndexes.isEmpty) {
+            await db.execute(
+              'CREATE INDEX idx_downloads_file_name ON $_table (file_name)',
+            );
+          }
         }
       },
     );
