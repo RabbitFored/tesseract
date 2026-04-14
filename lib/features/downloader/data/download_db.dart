@@ -110,12 +110,11 @@ class DownloadDb {
       path,
       version: _dbVersion,
       // WAL mode: readers never block writers and writers never block readers.
-      // This eliminates the "database locked" warning during concurrent
-      // progress reads (downloadQueueProvider) and writes (_flushPending).
+      // Use rawQuery for PRAGMAs — sqflite on Android rejects them via execute().
       onOpen: (db) async {
-        await db.execute('PRAGMA journal_mode=WAL');
-        await db.execute('PRAGMA synchronous=NORMAL');
-        await db.execute('PRAGMA cache_size=-4096'); // 4 MB page cache
+        await db.rawQuery('PRAGMA journal_mode=WAL');
+        await db.rawQuery('PRAGMA synchronous=NORMAL');
+        await db.rawQuery('PRAGMA cache_size=-4096');
       },
       onCreate: (db, version) async {
         await db.execute('''
